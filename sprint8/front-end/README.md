@@ -29,9 +29,9 @@ python front-end/app.py
 ```
 
 Usage
-- Open `http://localhost:5000/login` in your browser.
+- Open `http://localhost:4200/login` in your browser.
 - Log in using the auth server credentials; the JS expects the response to include a JWT (field `token` or `accessToken`).
 - After login you'll be redirected to `/dashboard` and can call profile, holdings, orders, and place order.
 
 Notes
-- The front end expects the backend to allow CORS from `http://localhost:5000`. If you get CORS issues, enable CORS in the Spring Boot app or run the front end as a static file served by a web server.
+- The front end expects the backend to allow CORS from `http://localhost:4200`. If you get CORS issues, enable CORS in the Spring Boot app or run the front end as a static file served by a web server.

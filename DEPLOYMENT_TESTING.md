@@ -158,7 +158,7 @@ docker exec -it trading-postgres psql -U postgres -d trading_system_db -c "SELEC
 docker compose logs executor | Select-String "ETL"
 ```
 
-Then open `http://localhost:5000` in a browser, log in with the demo or your
+Then open `http://localhost:4200` in a browser, log in with the demo or your
 test user, and confirm the analytics/dashboard page reflects the new
 holding/trade. The executor's Python ETL subprocess rewrites
 `analytics.duckdb` on the shared `analytics_data` volume roughly every 45s
@@ -171,7 +171,7 @@ checking.
 
 | Service      | Port  | URL / check                          |
 |--------------|-------|---------------------------------------|
-| Frontend     | 5000  | http://localhost:5000                |
+| Frontend     | 4200  | http://localhost:4200                |
 | Auth Service | 3000  | http://localhost:3000/docs (Swagger) |
 | Trade API    | 8085  | http://localhost:8085/health         |
 | Executor     | 8083  | -                                     |

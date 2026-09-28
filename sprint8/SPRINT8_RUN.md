@@ -5,12 +5,12 @@
 Sprint 8 delivers a complete authentication layer (`Sprint 08 Auth Service`,
 separate NestJS service) that **owns the users table and all password
 material**, plus a Trade REST API (`sprint8/`, port **8085**) that trusts
-tokens issued by the auth service, and a frontend (port **5000**) that
+tokens issued by the auth service, and a frontend (port **4200**) that
 registers/logs in against the auth service and calls the trade API.
 
 - **Auth service** — `sprint8-auth-service/` (NestJS, TypeScript, Jest)
 - **Trade API** — `sprint8/` (Spring Boot / MyBatis, port 8085)
-- **Frontend** — `sprint8/front-end/` (Flask, port 5000; register is the default page at `/`)
+- **Frontend** — `sprint8/front-end/` (Flask, port 4200; register is the default page at `/`)
 - **Database** — PostgreSQL `trading_system_db`, schemas `auth` + `trading`
 
 ## Ports
@@ -19,7 +19,7 @@ registers/logs in against the auth service and calls the trade API.
 | ----------- | ---- |
 | Auth API    | 3000 |
 | Trade API   | 8085 |
-| Frontend    | 5000 |
+| Frontend    | 4200 |
 | Executor    | 8083 |
 
 ## Prerequisites
@@ -87,7 +87,7 @@ The `JWT_SECRET` and `JWT_ISSUER` **must match** the auth service's
 configuration — the trade API rejects tokens with a different issuer, a blank
 `sub`, or an empty `roles` claim.
 
-## 4. Run the frontend (port 5000)
+## 4. Run the frontend (port 4200)
 
 ```bash
 cd sprint8/front-end
