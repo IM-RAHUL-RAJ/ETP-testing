@@ -206,8 +206,6 @@ services:
     environment:
       FLASK_ENV: ${FLASK_ENV:-development}
       FLASK_APP: app.py
-      BACKEND_URL: http://trade-api:8085
-      AUTH_URL: http://auth-service:3000
       DUCKDB_PATH: /data/analytics.duckdb
       DASHBOARD_REFRESH_SECONDS: ${DASHBOARD_REFRESH_SECONDS:-120}
     volumes:
