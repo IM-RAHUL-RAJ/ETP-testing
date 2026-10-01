@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: tester
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+        stack: trading-tester
+    spec:
+      imagePullSecrets:
+        - name: artifactory-pull-secret
+      containers:
+        - name: frontend
+          image: trialzww0tc.jfrog.io/REPLACE_WITH_DOCKER_REPOSITORY_KEY/trading-frontend:1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 4200
+          envFrom:
+            - configMapRef:
+                name: trading-config
+          env:
+            - name: DUCKDB_PATH
+              value: /data/analytics.duckdb
+            - name: BACKEND_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: trading-config
+                  key: BACKEND_URL
+            - name: AUTH_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: trading-config
+                  key: AUTH_URL
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 25m
+              memory: 96Mi
+            limits:
+              cpu: 100m
+              memory: 256Mi
+          volumeMounts:
+            - name: analytics-data
+              mountPath: /data
+      volumes:
+        - name: analytics-data
+          persistentVolumeClaim:
+            claimName: analytics-data

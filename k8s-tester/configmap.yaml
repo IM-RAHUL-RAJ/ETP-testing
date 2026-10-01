@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trading-config
+  namespace: tester
+data:
+  DB_HOST: REPLACE_WITH_RDS_ENDPOINT
+  DB_PORT: "5432"
+  DB_NAME: trading_system_db
+  DB_USER: trading_tester
+  JWT_ISSUER: auth-service
+  KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+  POLL_INTERVAL_SECONDS: "60"
+  ETL_ENABLED: "true"
+  ETL_REFRESH_INTERVAL_SECONDS: "45"
+  DUCKDB_PATH: /data/analytics.duckdb
+  PG_SCHEMA: trading
+  DASHBOARD_REFRESH_SECONDS: "120"
+  FLASK_ENV: production
+  BACKEND_URL: http://localhost:8085
+  AUTH_URL: http://localhost:3000

@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "associate-stack.id" . }}-frontend
+  labels:
+    {{- include "associate-stack.labels" . | nindent 4 }}
+    app.kubernetes.io/name: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: frontend
+      app.kubernetes.io/instance: {{ include "associate-stack.id" . | quote }}
+  template:
+    metadata:
+      labels:
+        {{- include "associate-stack.labels" . | nindent 8 }}
+        app.kubernetes.io/name: frontend
+    spec:
+      imagePullSecrets:
+        - name: {{ .Values.image.pullSecret }}
+      containers:
+        - name: frontend
+          image: {{ include "associate-stack.image" (dict "Values" .Values "imageName" "trading-frontend") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 4200
+          env:
+            - name: BACKEND_URL
+              value: {{ printf "https://%s.%s" (include "associate-stack.id" .) .Values.frontend.baseDomain | quote }}
+            - name: AUTH_URL
+              value: {{ printf "https://%s.%s" (include "associate-stack.id" .) .Values.frontend.baseDomain | quote }}
+            - name: DUCKDB_PATH
+              value: /tmp/analytics.duckdb
+            - name: DASHBOARD_REFRESH_SECONDS
+              value: {{ .Values.frontend.dashboardRefreshSeconds | quote }}
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.resources.frontend | nindent 12 }}

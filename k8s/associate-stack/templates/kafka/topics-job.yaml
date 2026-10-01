@@ -1,0 +1,43 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "associate-stack.id" . }}-kafka-topics
+  labels:
+    {{- include "associate-stack.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "1"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 10
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        {{- include "associate-stack.labels" . | nindent 8 }}
+        app.kubernetes.io/name: kafka-topics
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: create-topics
+          image: apache/kafka:3.8.0
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              BS={{ include "associate-stack.id" . }}-kafka:29092
+              until /opt/kafka/bin/kafka-topics.sh --bootstrap-server "$BS" --list >/dev/null 2>&1; do
+                echo "waiting for Kafka"
+                sleep 5
+              done
+              create() {
+                /opt/kafka/bin/kafka-topics.sh --bootstrap-server "$BS" --create --if-not-exists \
+                  --topic "$1" --partitions "$2" --replication-factor 1 --config retention.ms="$3"
+              }
+              create orders 3 604800000
+              create trade-events 3 2592000000
+              create market-data 6 86400000
+              create orders.DLT 3 604800000
+              create trade-events.DLT 3 2592000000
+              create market-data.DLT 6 86400000

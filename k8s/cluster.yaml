@@ -1,0 +1,22 @@
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+metadata:
+  name: trading-platform
+  region: us-east-1
+managedNodeGroups:
+  - name: student-workers
+    instanceType: t3.large
+    minSize: 2
+    desiredCapacity: 2
+    maxSize: 50
+    volumeSize: 40
+    privateNetworking: true
+iam:
+  withOIDC: true
+addons:
+  - name: vpc-cni
+  - name: kube-proxy
+  - name: coredns
+  - name: aws-ebs-csi-driver
+    wellKnownPolicies:
+      ebsCSIController: true

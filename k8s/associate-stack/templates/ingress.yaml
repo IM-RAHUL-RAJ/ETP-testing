@@ -1,0 +1,39 @@
+{{- $associateId := include "associate-stack.id" . -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $associateId }}-trading
+  annotations:
+    alb.ingress.kubernetes.io/group.name: trading-platform
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/certificate-arn: {{ .Values.frontend.certificateArn | quote }}
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+spec:
+  ingressClassName: alb
+  rules:
+    - host: {{ printf "%s.%s" $associateId .Values.frontend.baseDomain | quote }}
+      http:
+        paths:
+          - path: /auth
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $associateId }}-auth-service
+                port:
+                  number: 3000
+          - path: /api/v1
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $associateId }}-order-service
+                port:
+                  number: 8085
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $associateId }}-frontend
+                port:
+                  number: 4200

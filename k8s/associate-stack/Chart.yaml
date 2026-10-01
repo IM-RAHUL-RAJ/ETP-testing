@@ -1,0 +1,6 @@
+apiVersion: v2
+name: associate-stack
+description: One associate's Sprint 8 services and single-broker Kafka
+type: application
+version: 1.0.0
+appVersion: "1.0"

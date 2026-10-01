@@ -1,0 +1,970 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="ETP deployment fieldbook: Docker, AWS, EKS, ECR, RDS, ALB, CloudFront, GitOps, and Jenkins, explained stage by stage.">
+  <title>ETP EKS Fieldbook</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Sora:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    /* Layout: a mission-control console. Sticky step rail on the left, one wide reading column,
+       a staged architecture canvas first, then short "idea + commands" sections. Single dark theme by choice. */
+    :root {
+      color-scheme: dark;
+      --bg:#070a16; --panel:#0e1530; --panel-2:#131c3d; --line:#26346a; --line-soft:#1a2450;
+      --fg:#e8edff; --muted:#a3afd9; --dim:#6b78a8;
+      --cyan:#3fe3ff; --magenta:#ff58da; --lime:#b9ff66; --amber:#ffcb52; --red:#ff6577; --violet:#a78bff;
+      --display:"Chakra Petch","Segoe UI",system-ui,sans-serif;
+      --sans:"Sora","Segoe UI",system-ui,sans-serif;
+      --mono:"JetBrains Mono",ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+    }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; scroll-padding-top:84px; }
+    body { margin:0; color:var(--fg); background:var(--bg); font:16px/1.7 var(--sans); -webkit-font-smoothing:antialiased; }
+    body::before { position:fixed; z-index:-2; inset:0; pointer-events:none; content:"";
+      background:
+        radial-gradient(900px 520px at 85% -8%, rgba(255,88,218,.16), transparent 62%),
+        radial-gradient(820px 520px at 4% 6%, rgba(63,227,255,.15), transparent 60%),
+        radial-gradient(900px 700px at 50% 110%, rgba(167,139,255,.12), transparent 60%),
+        var(--bg); }
+    body::after { position:fixed; z-index:-1; inset:0; pointer-events:none; content:"";
+      background:linear-gradient(rgba(120,150,255,.055) 1px,transparent 1px),linear-gradient(90deg,rgba(120,150,255,.055) 1px,transparent 1px);
+      background-size:44px 44px; mask-image:radial-gradient(ellipse at 50% 20%,#000 30%,transparent 85%); -webkit-mask-image:radial-gradient(ellipse at 50% 20%,#000 30%,transparent 85%); }
+    a { color:var(--cyan); text-underline-offset:3px; text-decoration-color:rgba(63,227,255,.4); } a:hover { color:var(--magenta); }
+    :focus-visible { outline:2px solid var(--amber); outline-offset:2px; border-radius:4px; }
+    code,pre,kbd { font-family:var(--mono); }
+    code:not(pre code) { padding:1px 6px; border:1px solid var(--line); border-radius:4px; background:rgba(63,227,255,.07); color:#bff4ff; font-size:.86em; overflow-wrap:anywhere; }
+
+    #progress { position:fixed; top:0; left:0; z-index:30; width:0; height:3px; background:linear-gradient(90deg,var(--cyan),var(--violet),var(--magenta)); box-shadow:0 0 14px var(--magenta); }
+
+    .topbar { position:sticky; top:env(safe-area-inset-top,0px); z-index:20; display:flex; align-items:center; justify-content:space-between; gap:16px; min-height:64px; padding:0 max(20px,calc((100vw - 1500px)/2)); border-bottom:1px solid var(--line); background:rgba(7,10,22,.82); backdrop-filter:blur(14px); }
+    .brand { display:flex; align-items:center; gap:12px; font:700 17px var(--display); letter-spacing:.04em; text-transform:uppercase; white-space:nowrap; }
+    .mark { display:grid; width:38px; height:38px; place-items:center; clip-path:polygon(22% 0,100% 0,100% 78%,78% 100%,0 100%,0 22%); background:linear-gradient(135deg,var(--cyan),var(--magenta)); color:#060914; font:700 12px var(--mono); }
+    .brand small { display:block; color:var(--muted); font:500 10.5px var(--mono); letter-spacing:.14em; }
+    .top-meta { display:flex; align-items:center; gap:10px; color:var(--muted); font:500 11px var(--mono); letter-spacing:.06em; text-align:right; }
+    .pulse { width:9px; height:9px; border-radius:50%; background:var(--lime); box-shadow:0 0 0 0 rgba(185,255,102,.7); animation:pulse 2.2s infinite; }
+    @keyframes pulse { 70% { box-shadow:0 0 0 9px rgba(185,255,102,0); } 100% { box-shadow:0 0 0 0 rgba(185,255,102,0); } }
+
+    .layout { display:grid; grid-template-columns:240px minmax(0,1fr); gap:40px; width:min(1500px,100%); margin:auto; padding:28px 24px 72px; }
+    .toc { position:sticky; top:88px; align-self:start; max-height:calc(100vh - 108px); overflow:auto; padding:4px 0; scrollbar-width:thin; }
+    .toc-label { margin:0 0 10px 12px; color:var(--dim); font:500 10.5px var(--mono); letter-spacing:.16em; text-transform:uppercase; }
+    .toc a { display:flex; gap:10px; align-items:baseline; margin:1px 0; padding:6px 12px; border-left:2px solid var(--line-soft); color:var(--muted); font-size:13px; text-decoration:none; transition:color .15s,border-color .15s,background .15s; }
+    .toc a i { color:var(--dim); font:500 10.5px var(--mono); font-style:normal; min-width:18px; }
+    .toc a:hover { color:var(--fg); border-left-color:var(--violet); }
+    .toc a.active { border-left-color:var(--cyan); background:linear-gradient(90deg,rgba(63,227,255,.14),transparent); color:var(--fg); }
+    .toc a.active i { color:var(--cyan); }
+    main { min-width:0; max-width:1180px; }
+
+    .hero { position:relative; padding:26px 0 8px; }
+    .eyebrow { color:var(--cyan); font:500 12px var(--mono); letter-spacing:.18em; text-transform:uppercase; }
+    .eyebrow::before { content:"// "; color:var(--magenta); }
+    h1 { max-width:900px; margin:12px 0 12px; font:700 clamp(36px,5.2vw,68px)/1.02 var(--display); text-transform:uppercase; text-wrap:balance; }
+    h1 em { font-style:normal; background:linear-gradient(90deg,var(--cyan),var(--violet) 55%,var(--magenta)); -webkit-background-clip:text; background-clip:text; color:transparent; }
+    .lead { max-width:720px; margin:0; color:var(--muted); font-size:18px; }
+
+    .status { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:10px; margin:24px 0 8px; }
+    .status-item { padding:12px 14px 13px; border:1px solid var(--line); background:linear-gradient(180deg,rgba(19,28,61,.8),rgba(14,21,48,.6)); clip-path:polygon(0 0,calc(100% - 12px) 0,100% 12px,100% 100%,0 100%); }
+    .status-item b { display:block; margin-bottom:2px; font:700 10.5px var(--mono); letter-spacing:.14em; }
+    .status-item span { display:block; color:var(--muted); font-size:14px; line-height:1.45; }
+    .status-item.ok { border-top:2px solid var(--lime); } .status-item.ok b { color:var(--lime); }
+    .status-item.wait { border-top:2px solid var(--amber); } .status-item.wait b { color:var(--amber); }
+    .status-item.bad { border-top:2px solid var(--red); } .status-item.bad b { color:var(--red); }
+
+    section { padding:38px 0 30px; border-top:1px solid var(--line-soft); scroll-margin-top:84px; }
+    .section-head { display:grid; grid-template-columns:76px minmax(0,1fr); gap:14px; align-items:start; margin-bottom:14px; }
+    .num { font:700 44px/1 var(--display); color:transparent; -webkit-text-stroke:1.2px var(--cyan); text-shadow:0 0 22px rgba(63,227,255,.35); }
+    h2 { margin:0; font:700 clamp(22px,2.6vw,30px)/1.2 var(--display); letter-spacing:.02em; text-transform:uppercase; text-wrap:balance; }
+    h3 { margin:28px 0 8px; font:600 17px var(--display); letter-spacing:.06em; text-transform:uppercase; color:var(--cyan); }
+    h3::before { content:"▸ "; color:var(--magenta); }
+    h4 { margin:0 0 6px; font:600 14px var(--display); letter-spacing:.08em; text-transform:uppercase; }
+    p { margin:9px 0; max-width:780px; } ul,ol { padding-left:22px; max-width:780px; } li { margin:6px 0; }
+    .small { color:var(--muted); font-size:14px; }
+    .jump { display:inline-flex; align-items:center; gap:8px; margin-top:10px; padding:6px 12px; border:1px solid rgba(255,88,218,.5); border-radius:999px; background:rgba(255,88,218,.08); color:#ffc4f1; cursor:pointer; font:500 11.5px var(--mono); letter-spacing:.06em; }
+    .jump:hover { background:rgba(255,88,218,.2); color:#fff; }
+
+    /* the one-paragraph concept that opens every section */
+    .idea { max-width:none; margin:0 0 16px; padding:14px 18px; border:1px solid rgba(185,255,102,.35); border-left:4px solid var(--lime); border-radius:6px; background:rgba(185,255,102,.06); font-size:17px; line-height:1.6; }
+    .idea b:first-child { display:block; margin-bottom:3px; color:var(--lime); font:700 10.5px var(--mono); letter-spacing:.16em; }
+
+    .gate { margin:16px 0; padding:12px 16px 12px 18px; border:1px solid rgba(255,101,119,.45); border-left:4px solid var(--red); border-radius:6px; background:rgba(255,101,119,.08); }
+    .gate strong { color:var(--red); font-family:var(--display); letter-spacing:.05em; text-transform:uppercase; }
+    .gate.info { border-color:rgba(63,227,255,.4); border-left-color:var(--cyan); background:rgba(63,227,255,.07); } .gate.info strong { color:var(--cyan); }
+    .gate.warn { border-color:rgba(255,203,82,.45); border-left-color:var(--amber); background:rgba(255,203,82,.07); } .gate.warn strong { color:var(--amber); }
+    .gate.new { border-color:rgba(255,88,218,.5); border-left-color:var(--magenta); background:rgba(255,88,218,.07); } .gate.new strong { color:var(--magenta); }
+
+    .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:12px; margin:14px 0; }
+    .card { min-width:0; padding:14px 16px; border:1px solid var(--line); border-top:2px solid var(--cyan); border-radius:6px; background:rgba(14,21,48,.75); }
+    .card.m { border-top-color:var(--magenta); } .card.l { border-top-color:var(--lime); } .card.a { border-top-color:var(--amber); }
+    .card p { margin:4px 0 0; color:var(--muted); font-size:15px; }
+    .card .big { display:block; margin-bottom:4px; font:700 22px var(--display); color:var(--fg); }
+
+    .code-wrap { overflow:hidden; margin:14px 0 18px; border:1px solid var(--line); border-radius:9px; background:#050814; box-shadow:0 18px 44px -26px rgba(63,227,255,.5); }
+    .code-head { display:flex; align-items:center; justify-content:space-between; gap:10px; min-height:38px; padding:6px 10px 6px 14px; border-bottom:1px solid var(--line-soft); background:linear-gradient(90deg,rgba(63,227,255,.1),rgba(255,88,218,.06)); color:var(--muted); font:500 11px var(--mono); letter-spacing:.08em; }
+    .code-head span::before { content:"● ● ●"; margin-right:12px; color:var(--line); letter-spacing:2px; font-size:9px; vertical-align:1px; }
+    .copy { flex:none; padding:5px 11px; border:1px solid var(--line); border-radius:5px; background:transparent; color:var(--fg); cursor:pointer; font:500 11px var(--mono); letter-spacing:.06em; }
+    .copy:hover { border-color:var(--cyan); color:var(--cyan); box-shadow:0 0 12px rgba(63,227,255,.35); }
+    pre { overflow:auto; max-height:520px; margin:0; padding:15px 17px; color:#d5e2ff; font:13px/1.72 var(--mono); tab-size:2; scrollbar-width:thin; }
+    pre .c { color:#7384bd; font-style:italic; } pre .ph { color:var(--amber); }
+
+    .table-wrap { overflow-x:auto; margin:14px 0 18px; border:1px solid var(--line); border-radius:9px; background:rgba(14,21,48,.7); }
+    table { width:100%; border-collapse:collapse; font-size:14.5px; line-height:1.5; } th,td { padding:10px 13px; border-bottom:1px solid var(--line-soft); text-align:left; vertical-align:top; }
+    th { background:rgba(63,227,255,.08); color:var(--cyan); font:500 10.5px var(--mono); letter-spacing:.14em; text-transform:uppercase; white-space:nowrap; } tr:last-child td { border-bottom:0; }
+    tbody tr:hover td { background:rgba(167,139,255,.06); }
+    .tag { display:inline-block; padding:2px 8px; border-radius:4px; font:700 10.5px var(--mono); letter-spacing:.1em; white-space:nowrap; vertical-align:middle; }
+    .tag.fx { background:rgba(185,255,102,.12); color:var(--lime); border:1px solid rgba(185,255,102,.45); }
+    .tag.td { background:rgba(255,203,82,.14); color:var(--amber); border:1px solid rgba(255,203,82,.5); }
+    .tag.kn { background:rgba(167,139,255,.14); color:var(--violet); border:1px solid rgba(167,139,255,.5); }
+
+    .steps { counter-reset:step; margin:12px 0 12px 12px; padding:0; list-style:none; }
+    .steps li { position:relative; min-height:30px; margin:0; padding:1px 0 11px 38px; border-left:1px dashed var(--line); }
+    .steps li::before { position:absolute; top:0; left:-13px; display:grid; width:25px; height:25px; place-items:center; border:1px solid var(--cyan); border-radius:6px; background:var(--bg); color:var(--cyan); content:counter(step); counter-increment:step; font:500 11px var(--mono); box-shadow:0 0 10px rgba(63,227,255,.3); }
+    .steps li:last-child { border-left-color:transparent; }
+
+    /* ---------- diagrams ---------- */
+    .blueprint, figure.concept { margin:26px 0 6px; border:1px solid var(--line); border-radius:12px; background:linear-gradient(180deg,rgba(14,21,48,.92),rgba(7,10,22,.92)); overflow:hidden; }
+    .blueprint { box-shadow:0 30px 80px -40px rgba(255,88,218,.55); }
+    figure.concept figcaption { padding:12px 18px 14px; border-top:1px solid var(--line-soft); color:var(--muted); font-size:14.5px; }
+    .bp-head { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; padding:13px 16px; border-bottom:1px solid var(--line-soft); background:linear-gradient(90deg,rgba(63,227,255,.1),rgba(255,88,218,.08)); }
+    .bp-title { font:700 15px var(--display); letter-spacing:.12em; text-transform:uppercase; }
+    .bp-title small { margin-left:10px; color:var(--muted); font:500 11px var(--mono); letter-spacing:.08em; }
+    .bp-ctl { display:flex; gap:6px; }
+    .bp-ctl button { padding:6px 12px; border:1px solid var(--line); border-radius:6px; background:rgba(7,10,22,.6); color:var(--fg); cursor:pointer; font:500 12px var(--mono); }
+    .bp-ctl button:hover { border-color:var(--cyan); color:var(--cyan); }
+    .bp-stages { display:flex; gap:6px; overflow-x:auto; padding:11px 16px; border-bottom:1px solid var(--line-soft); scrollbar-width:thin; }
+    .bp-stages button { flex:none; display:flex; align-items:center; gap:8px; padding:6px 11px; border:1px solid var(--line); border-radius:6px; background:transparent; color:var(--muted); cursor:pointer; font:500 12px var(--mono); white-space:nowrap; }
+    .bp-stages button b { font-weight:700; color:var(--dim); }
+    .bp-stages button .dot { width:7px; height:7px; border-radius:50%; background:var(--dim); }
+    .bp-stages button[data-st="done"] .dot { background:var(--lime); box-shadow:0 0 8px var(--lime); }
+    .bp-stages button[data-st="next"] .dot { background:var(--amber); box-shadow:0 0 8px var(--amber); }
+    .bp-stages button:hover { color:var(--fg); border-color:var(--violet); }
+    .bp-stages button[aria-pressed="true"] { border-color:var(--magenta); background:rgba(255,88,218,.14); color:#fff; box-shadow:0 0 16px rgba(255,88,218,.35); }
+    .bp-stages button[aria-pressed="true"] b { color:var(--magenta); }
+    .bp-canvas { overflow-x:auto; padding:10px 12px 4px; }
+    .bp-canvas svg { display:block; width:100%; min-width:940px; height:auto; }
+    .bp-legend { display:flex; flex-wrap:wrap; gap:6px 18px; padding:4px 16px 12px; color:var(--muted); font:500 11px var(--mono); }
+    .bp-legend i { display:inline-block; width:22px; height:0; margin-right:7px; vertical-align:middle; border-top:2px solid #7f8fc7; }
+    .bp-legend i.h { border-color:var(--magenta); } .bp-legend i.o { border-top:2px dashed var(--dim); } .bp-legend i.d { border-top:2px dashed #7f8fc7; } .bp-legend i.g { border-color:var(--lime); }
+    .bp-notes { margin:0; padding:0; list-style:none; border-top:1px solid var(--line-soft); max-width:none; }
+    .bp-notes li { margin:0; padding:16px 18px 18px; border-bottom:1px solid var(--line-soft); }
+    .bp-notes li:last-child { border-bottom:0; }
+    .js .bp-notes li { display:none; } .js .bp-notes li.on { display:block; }
+    .bp-notes h4 { margin:0 0 6px; font-size:19px; letter-spacing:.06em; }
+    .bp-notes h4 span { margin-right:10px; color:var(--magenta); font-family:var(--mono); font-size:13px; }
+    .bp-notes h4 em { margin-left:10px; padding:2px 8px; border-radius:4px; font:700 10px var(--mono); font-style:normal; letter-spacing:.12em; vertical-align:2px; }
+    .bp-notes em.done { color:var(--lime); border:1px solid rgba(185,255,102,.5); } .bp-notes em.next { color:var(--amber); border:1px solid rgba(255,203,82,.5); } .bp-notes em.plan { color:var(--muted); border:1px solid var(--line); }
+    .bp-notes p { margin:4px 0 0; max-width:900px; color:var(--muted); font-size:16px; } .bp-notes p b { color:var(--fg); font-weight:600; }
+
+    .dg text { font-family:var(--mono); fill:var(--fg); }
+    .dg .z { fill:rgba(63,227,255,.03); stroke:var(--line); stroke-width:1.2; stroke-dasharray:6 5; }
+    .dg .z.acct { fill:rgba(167,139,255,.04); stroke:var(--violet); stroke-dasharray:none; }
+    .dg .z.vpc { fill:rgba(63,227,255,.035); stroke:rgba(63,227,255,.55); stroke-dasharray:none; }
+    .dg .z.ns { fill:rgba(185,255,102,.035); stroke:rgba(185,255,102,.5); }
+    .dg .z.bad { fill:rgba(255,101,119,.08); stroke:var(--red); } .dg .z.good { fill:rgba(185,255,102,.07); stroke:var(--lime); }
+    .dg .zl { font-size:10px; letter-spacing:.14em; fill:var(--muted); text-transform:uppercase; }
+    .dg .pt { font-size:15px; font-weight:700; font-family:var(--display); letter-spacing:.1em; text-transform:uppercase; }
+    .dg .n rect { fill:var(--panel-2); stroke:var(--cyan); stroke-width:1.3; }
+    .dg .n .t { font-size:12px; font-weight:700; text-anchor:middle; }
+    .dg .n .s { font-size:9.8px; fill:var(--muted); text-anchor:middle; }
+    .dg .e path { fill:none; stroke:#7f8fc7; stroke-width:1.5; marker-end:url(#ar); }
+    .dg .e path.nm { marker-end:none; }
+    .dg .e.dash path { stroke-dasharray:5 4; }
+    .dg .e.out path { stroke:var(--magenta); stroke-width:1.8; marker-end:url(#arh); } .dg .e.out path.nm { marker-end:none; }
+    .dg .e.in path { stroke:var(--lime); stroke-width:1.8; marker-end:url(#arl); }
+    .dg .l { font-size:10px; fill:#c3cdf2; paint-order:stroke; stroke:var(--bg); stroke-width:3.5px; stroke-linejoin:round; }
+    .dg .l.big { font-size:11.5px; } .dg .l.pk { fill:#ffc4f1; } .dg .l.gr { fill:#dcffb0; } .dg .l.rd { fill:#ffb3bc; }
+    .dg [data-s] { transition:opacity .45s ease; }
+    .dg .off { opacity:0; pointer-events:none; }
+    .dg .new.n rect { stroke:var(--magenta); stroke-width:2; fill:rgba(255,88,218,.14); filter:drop-shadow(0 0 7px rgba(255,88,218,.75)); }
+    .dg .new.zg > .z { stroke:var(--magenta); stroke-width:1.8; }
+    .dg .new.e path { stroke:var(--magenta); stroke-width:2; marker-end:url(#arh); stroke-dasharray:7 5; animation:flow 1s linear infinite; }
+    .dg .new.e path.nm { marker-end:none; }
+    .dg .new .l, .dg .new.l { fill:#ffd0f4; }
+    .dg .old { opacity:.26; } .dg .old.n rect, .dg .old.e path { stroke-dasharray:3 4; stroke:var(--dim); }
+    @keyframes flow { to { stroke-dashoffset:-24; } }
+
+    .footer { display:flex; flex-wrap:wrap; justify-content:space-between; gap:12px; padding:22px 0; border-top:1px solid var(--line-soft); color:var(--dim); font:500 11.5px var(--mono); }
+    @media (max-width:1020px) { .layout { grid-template-columns:1fr; gap:6px; padding:14px 18px 44px; } .toc { top:64px; z-index:8; display:flex; gap:4px; max-height:none; overflow-x:auto; margin:0 -18px; padding:8px 18px; border-bottom:1px solid var(--line-soft); background:rgba(7,10,22,.92); backdrop-filter:blur(10px); } .toc-label { display:none; } .toc a { flex:0 0 auto; margin:0; padding:5px 10px; border:1px solid var(--line-soft); border-radius:999px; white-space:nowrap; } .toc a.active { border-color:var(--cyan); } main { max-width:none; } }
+    @media (max-width:680px) { body { font-size:15.5px; } .topbar { min-height:58px; padding:0 16px; } .top-meta span:last-child { display:none; } .brand { font-size:14px; } .toc { top:58px; } .section-head { grid-template-columns:1fr; gap:4px; } .num { font-size:32px; } pre { font-size:12px; } .lead,.idea { font-size:16px; } }
+    @media (prefers-reduced-motion:reduce) { html { scroll-behavior:auto; } * { transition-duration:.01ms !important; animation:none !important; } }
+  </style>
+</head>
+<body>
+  <div id="progress" aria-hidden="true"></div>
+  <header class="topbar" id="top"><div class="brand"><span class="mark">ETP</span><span>Deployment Fieldbook<small>AWS · EKS · DELIVERY PATH</small></span></div><div class="top-meta"><span class="pulse" aria-hidden="true"></span><span>CHECKED AGAINST REPO · 2026-10-01</span><span>· NO PASSWORDS IN THIS FILE</span></div></header>
+  <div class="layout">
+    <nav class="toc" aria-label="Guide contents"><p class="toc-label">The path</p>
+      <a href="#blueprint"><i>◆</i>Architecture build-up</a><a href="#overview"><i>00</i>Big picture</a><a href="#done"><i>01</i>Docker and JFrog</a><a href="#network"><i>◆</i>Localhost, names, CORS</a><a href="#aws"><i>02</i>AWS login and tools</a><a href="#cluster"><i>03</i>EKS cluster</a><a href="#namespaces"><i>04</i>Namespace</a><a href="#ecr"><i>05</i>ECR images</a><a href="#rds"><i>06</i>RDS database</a><a href="#secrets"><i>07</i>Secrets</a><a href="#alb"><i>08</i>Load balancer controller</a><a href="#certs"><i>09</i>Certificates</a><a href="#deploy"><i>10</i>Deploy the app</a><a href="#cloudfront"><i>11</i>CloudFront</a><a href="#dns"><i>12</i>Route 53 DNS</a><a href="#gitops"><i>13</i>GitOps</a><a href="#jenkins"><i>14</i>Jenkins</a><a href="#checks"><i>15</i>Test and roll back</a><a href="#costs"><i>16</i>Cost and cleanup</a><a href="#review"><i>RV</i>Review notes</a>
+    </nav>
+    <main>
+      <div class="hero"><div class="eyebrow">From one machine to managed AWS</div><h1>Deploy the trading platform, <em>stage by stage.</em></h1><p class="lead">Each stage adds one piece. Click through the diagram first, then follow the numbered steps.</p></div>
+
+      <div class="status">
+        <div class="status-item ok"><b>DONE</b><span>Four app images built at tag <code>1.0</code>.</span></div>
+        <div class="status-item ok"><b>DONE</b><span>All four pushed to JFrog.</span></div>
+        <div class="status-item wait"><b>NEXT</b><span>Log in to the TTH AWS account.</span></div>
+        <div class="status-item wait"><b>DECIDE</b><span>One region. The YAML says <code>us-east-1</code>, a recent command used <code>ap-south-1</code>.</span></div>
+        <div class="status-item bad"><b>INSTALL</b><span><code>eksctl</code>, <code>kubectl</code>, and <code>helm</code> are missing on this host.</span></div>
+      </div>
+
+      <!-- ================= STAGED ARCHITECTURE ================= -->
+      <div class="blueprint" id="blueprint" tabindex="0" aria-label="Staged architecture build-up. Use left and right arrow keys to change stage.">
+        <div class="bp-head"><div class="bp-title">Architecture build-up<small>STAGE <span id="bp-n">1</span> / 9</small></div><div class="bp-ctl"><button type="button" id="bp-prev" aria-label="Previous stage">◀ Prev</button><button type="button" id="bp-play">▶ Play</button><button type="button" id="bp-next" aria-label="Next stage">Next ▶</button></div></div>
+        <div class="bp-stages" id="bp-stages" role="group" aria-label="Stages">
+          <button type="button" data-go="0" data-st="done"><span class="dot"></span><b>0</b>Local stack</button>
+          <button type="button" data-go="1" data-st="done"><span class="dot"></span><b>1</b>JFrog images</button>
+          <button type="button" data-go="2" data-st="next"><span class="dot"></span><b>2</b>AWS + EKS</button>
+          <button type="button" data-go="3"><span class="dot"></span><b>3</b>ECR</button>
+          <button type="button" data-go="4"><span class="dot"></span><b>4</b>RDS</button>
+          <button type="button" data-go="5"><span class="dot"></span><b>5</b>Secrets</button>
+          <button type="button" data-go="6"><span class="dot"></span><b>6</b>App + ALB</button>
+          <button type="button" data-go="7"><span class="dot"></span><b>7</b>CloudFront + DNS</button>
+          <button type="button" data-go="8"><span class="dot"></span><b>8</b>GitOps + CI</button>
+          <button type="button" data-go="9"><span class="dot"></span><b>9</b>Hardened</button>
+        </div>
+        <div class="bp-canvas">
+          <svg class="dg" viewBox="0 0 1200 720" role="img" aria-label="Staged architecture: a local Docker Compose stack publishes images to JFrog; an AWS account then gains a VPC with a private EKS node group, ECR, private RDS, Secrets Manager synced by External Secrets, an ALB routing to frontend, auth, and order services, Kafka feeding the trade executor, CloudFront and Route 53 in front, Argo CD pulling from a GitOps repo that Jenkins updates, and finally S3 for static files.">
+            <defs>
+              <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#7f8fc7"/></marker>
+              <marker id="arh" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#ff58da"/></marker>
+              <marker id="arl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#b9ff66"/></marker>
+            </defs>
+
+            <!-- workbench -->
+            <g class="zg" data-s="0"><rect class="z" x="20" y="70" width="230" height="230" rx="8"/><text class="zl" x="32" y="90">EC2 workbench · compose</text>
+              <text class="l" x="32" y="270">network: trading-network</text></g>
+            <g class="n" data-s="0"><rect x="32" y="104" width="100" height="40" rx="5"/><text class="t" x="82" y="121">frontend</text><text class="s" x="82" y="135">:4200</text></g>
+            <g class="n" data-s="0"><rect x="138" y="104" width="100" height="40" rx="5"/><text class="t" x="188" y="121">auth</text><text class="s" x="188" y="135">:3000</text></g>
+            <g class="n" data-s="0"><rect x="32" y="154" width="100" height="40" rx="5"/><text class="t" x="82" y="171">trade-api</text><text class="s" x="82" y="185">:8085</text></g>
+            <g class="n" data-s="0"><rect x="138" y="154" width="100" height="40" rx="5"/><text class="t" x="188" y="171">executor</text><text class="s" x="188" y="185">:8083</text></g>
+            <g class="n" data-s="0"><rect x="32" y="204" width="100" height="40" rx="5"/><text class="t" x="82" y="221">kafka</text><text class="s" x="82" y="235">KRaft :29092</text></g>
+            <g class="n" data-s="0"><rect x="138" y="204" width="100" height="40" rx="5"/><text class="t" x="188" y="221">postgres</text><text class="s" x="188" y="235">:5432</text></g>
+            <text class="l" data-s="1" x="32" y="288">built: trading-*:1.0</text>
+
+            <g class="n" data-s="1" data-r="4"><rect x="20" y="330" width="230" height="60" rx="6"/><text class="t" x="135" y="355">JFrog Artifactory</text><text class="s" x="135" y="373">fauxnance-docker · 4 images :1.0</text></g>
+            <g class="e" data-s="1" data-r="4"><path d="M135 300V330"/><text class="l" x="127" y="319" text-anchor="end">push :1.0</text></g>
+
+            <g class="n" data-s="8"><rect x="20" y="430" width="230" height="50" rx="6"/><text class="t" x="135" y="451">Git app repo</text><text class="s" x="135" y="467">source · tests · Dockerfiles</text></g>
+            <g class="n" data-s="8"><rect x="20" y="510" width="230" height="56" rx="6"/><text class="t" x="135" y="534">Jenkins</text><text class="s" x="135" y="551">test → build → push</text></g>
+            <g class="n" data-s="8"><rect x="20" y="630" width="230" height="50" rx="6"/><text class="t" x="135" y="651">GitOps repo</text><text class="s" x="135" y="667">chart + values · no secrets</text></g>
+            <g class="e" data-s="8"><path d="M135 480V510"/><text class="l" x="143" y="499">webhook</text></g>
+            <g class="e" data-s="8"><path d="M135 566V630"/><text class="l" x="143" y="602">PR: bump image tag</text></g>
+            <g class="e" data-s="8"><path d="M250 538H262V225H310"/><text class="l" x="256" y="414" text-anchor="end">push :git-sha</text></g>
+
+            <!-- aws account -->
+            <g class="zg" data-s="2"><rect class="z acct" x="290" y="70" width="890" height="630" rx="10"/><text class="zl" x="305" y="690">AWS account TTH · one region</text></g>
+            <g class="n" data-s="2"><rect x="310" y="120" width="130" height="60" rx="6"/><text class="t" x="375" y="145">EKS API</text><text class="s" x="375" y="162">managed control plane</text></g>
+            <text class="l" data-s="2" x="375" y="196" text-anchor="middle">kube API</text>
+            <g class="e dash" data-s="2"><path d="M440 150H458V270H485"/></g>
+
+            <g class="n" data-s="3"><rect x="310" y="205" width="130" height="60" rx="6"/><text class="t" x="375" y="230">ECR</text><text class="s" x="375" y="247">4 repos · immutable</text></g>
+            <text class="l" data-s="3" x="375" y="281" text-anchor="middle">image pull</text>
+            <g class="e" data-s="3"><path d="M440 235H466V288H485"/></g>
+            <g class="e" data-s="3" data-r="4"><path d="M250 360H274V245H310"/><text class="l" x="268" y="318" text-anchor="end">retag + push</text></g>
+
+            <g class="n" data-s="5"><rect x="310" y="290" width="130" height="60" rx="6"/><text class="t" x="375" y="315">Secrets Manager</text><text class="s" x="375" y="332">/trading/demo/runtime</text></g>
+            <text class="l" data-s="5" x="375" y="366" text-anchor="middle">GetSecretValue</text>
+            <g class="e" data-s="5"><path d="M440 320H462V390H495"/></g>
+
+            <g class="n" data-s="9"><rect x="310" y="375" width="130" height="60" rx="6"/><text class="t" x="375" y="400">CloudWatch</text><text class="s" x="375" y="417">logs · metrics · alarms</text></g>
+
+            <!-- vpc -->
+            <g class="zg" data-s="2"><rect class="z vpc" x="470" y="110" width="690" height="530" rx="8"/><text class="zl" x="900" y="132" text-anchor="middle">VPC · public edge, private nodes</text>
+              <rect class="z" x="485" y="150" width="665" height="80" rx="6"/><text class="zl" x="850" y="195" text-anchor="middle">public subnets</text>
+              <rect class="z" x="485" y="260" width="665" height="260" rx="6"/><text class="zl" x="497" y="281">EKS managed nodes · private subnets</text>
+              <rect class="z ns" x="645" y="295" width="490" height="210" rx="6"/><text class="zl" x="657" y="313">namespace: trading</text></g>
+            <g class="n" data-s="2"><rect x="1060" y="165" width="80" height="50" rx="6"/><text class="t" x="1100" y="186">NAT GW</text><text class="s" x="1100" y="202">egress</text></g>
+
+            <g class="zg" data-s="4"><rect class="z" x="485" y="545" width="665" height="80" rx="6"/><text class="zl" x="1000" y="590" text-anchor="middle">private DB subnets · 2 AZs</text></g>
+            <g class="n" data-s="4"><rect x="645" y="558" width="210" height="54" rx="6"/><text class="t" x="750" y="581">RDS PostgreSQL</text><text class="s" x="750" y="598">trading_system_db · SG: nodes only</text></g>
+
+            <g class="n" data-s="5"><rect x="495" y="365" width="130" height="50" rx="6"/><text class="t" x="560" y="386">External Secrets</text><text class="s" x="560" y="402">ESO + IRSA</text></g>
+            <g class="n" data-s="5"><rect x="660" y="425" width="130" height="50" rx="6"/><text class="t" x="725" y="446" style="font-size:10.5px">demo-runtime-secret</text><text class="s" x="725" y="462">K8s Secret · 3 keys</text></g>
+            <g class="e" data-s="5"><path d="M625 390H637V450H660"/><text class="l" x="652" y="414">syncs</text></g>
+
+            <!-- stage 6: app + ALB -->
+            <g class="n" data-s="6"><rect x="1010" y="10" width="170" height="45" rx="6"/><text class="t" x="1095" y="29">Fauxnance API</text><text class="s" x="1095" y="45">external market data</text></g>
+            <g class="n" data-s="6"><rect x="500" y="165" width="140" height="50" rx="6"/><text class="t" x="570" y="186">ALB</text><text class="s" x="570" y="202">443 · TLS via ACM</text></g>
+            <g class="n" data-s="6"><rect x="495" y="300" width="130" height="50" rx="6"/><text class="t" x="560" y="321">LB Controller</text><text class="s" x="560" y="337">watches Ingress</text></g>
+            <g class="e dash" data-s="6"><path d="M560 300V215"/><text class="l" x="554" y="250" text-anchor="end">provisions</text></g>
+            <g class="n" data-s="6" data-r="9"><rect x="660" y="322" width="130" height="50" rx="6"/><text class="t" x="725" y="343">frontend</text><text class="s" x="725" y="359">:4200 · Flask</text></g>
+            <g class="n" data-s="6"><rect x="820" y="322" width="130" height="50" rx="6"/><text class="t" x="885" y="343">auth-service</text><text class="s" x="885" y="359">:3000 · NestJS</text></g>
+            <g class="n" data-s="6"><rect x="980" y="322" width="130" height="50" rx="6"/><text class="t" x="1045" y="343">order-service</text><text class="s" x="1045" y="359">:8085 · Spring</text></g>
+            <g class="n" data-s="6"><rect x="820" y="425" width="130" height="50" rx="6"/><text class="t" x="885" y="446">trade-executor</text><text class="s" x="885" y="462">:8083 · poller</text></g>
+            <g class="n" data-s="6"><rect x="980" y="425" width="130" height="50" rx="6"/><text class="t" x="1045" y="446">kafka-0</text><text class="s" x="1045" y="462">KRaft · EBS gp3 2Gi</text></g>
+            <g class="e" data-s="6"><path class="nm" d="M610 215V245H1045"/><path d="M885 245V322"/><path d="M1045 245V322"/><text class="l" x="891" y="283">/auth</text><text class="l" x="1051" y="283">/api/v1</text></g>
+            <g class="e" data-s="6" data-r="9"><path d="M725 245V322"/><text class="l" x="731" y="283">/</text></g>
+            <g class="e" data-s="6"><path d="M1045 372V425"/><text class="l" x="1052" y="402">orders</text></g>
+            <g class="e" data-s="6"><path d="M980 450H950"/><text class="l" x="965" y="416" text-anchor="middle">consume</text></g>
+            <g class="e" data-s="6"><path d="M885 475V492H1125V215"/><text class="l" x="1005" y="488" text-anchor="middle">price polls</text></g>
+            <g class="e" data-s="6"><path d="M1100 165V55"/><text class="l" x="1094" y="95" text-anchor="end">HTTPS egress</text></g>
+            <g class="e" data-s="6"><path d="M750 505V558"/><text class="l" x="758" y="537">5432 TLS · auth, order, executor</text></g>
+
+            <!-- stage 7: CloudFront, then DNS -->
+            <g class="n" data-s="7"><rect x="330" y="10" width="120" height="45" rx="6"/><text class="t" x="390" y="29">Route 53</text><text class="s" x="390" y="45">alias → CloudFront</text></g>
+            <g class="n" data-s="7"><rect x="500" y="10" width="140" height="45" rx="6"/><text class="t" x="570" y="29">Browser</text><text class="s" x="570" y="45">demo.apps.example.com</text></g>
+            <g class="n" data-s="7"><rect x="680" y="10" width="160" height="45" rx="6"/><text class="t" x="760" y="29">CloudFront</text><text class="s" x="760" y="45">edge · TLS · one door</text></g>
+            <g class="e dash" data-s="7"><path d="M500 32H450"/><text class="l" x="475" y="24" text-anchor="middle">DNS</text></g>
+            <g class="e" data-s="7"><path d="M640 32H680"/><text class="l" x="660" y="24" text-anchor="middle">HTTPS</text></g>
+            <g class="e" data-s="7"><path d="M760 55V140H625V165"/><text class="l" x="766" y="100">origin: ALB</text></g>
+
+            <!-- stage 8: GitOps -->
+            <g class="n" data-s="8"><rect x="495" y="430" width="130" height="50" rx="6"/><text class="t" x="560" y="451">Argo CD</text><text class="s" x="560" y="467">syncs Helm release</text></g>
+            <g class="e" data-s="8"><path d="M250 655H560V480"/><text class="l" x="400" y="649" text-anchor="middle">pulls desired state</text></g>
+            <g class="e" data-s="8"><path d="M625 462H645"/></g>
+
+            <!-- stage 9: static to S3 -->
+            <g class="n" data-s="9"><rect x="890" y="10" width="100" height="45" rx="6"/><text class="t" x="940" y="29">S3</text><text class="s" x="940" y="45">static files</text></g>
+            <g class="e" data-s="9"><path d="M840 32H890"/><text class="l" x="865" y="24" text-anchor="middle">/static</text></g>
+          </svg>
+        </div>
+        <div class="bp-legend"><span><i class="h"></i>added in this stage</span><span><i></i>already in place</span><span><i class="d"></i>control or lookup</span><span><i class="o"></i>retired</span></div>
+        <ol class="bp-notes" id="bp-notes">
+          <li data-n="0"><h4><span>STAGE 0</span>Everything on one machine<em class="done">DONE</em></h4><p>Six containers run side by side with Docker Compose. <b>It proves the code works.</b> It does not prove the app can survive in the real world.</p></li>
+          <li data-n="1"><h4><span>STAGE 1</span>Put the images on a shelf<em class="done">DONE</em></h4><p>We build four images and push them to JFrog. <b>A cluster cannot read your laptop</b>, so images must live in a registry it can pull from.</p></li>
+          <li data-n="2"><h4><span>STAGE 2</span>Build the empty house<em class="next">NEXT</em></h4><p>Log in to AWS, then create the network (VPC) and the Kubernetes cluster (EKS). <b>The servers sit in private subnets</b>, so nobody on the internet can reach them directly. Nothing runs yet.</p></li>
+          <li data-n="3"><h4><span>STAGE 3</span>Move the shelf into AWS<em class="plan">PLANNED</em></h4><p>Copy the images from JFrog to ECR. <b>The cluster can now pull images with its own AWS identity</b>, so we no longer need a JFrog password inside the cluster.</p></li>
+          <li data-n="4"><h4><span>STAGE 4</span>A real database<em class="plan">PLANNED</em></h4><p>Create PostgreSQL on RDS in private subnets. <b>Only the cluster can talk to it.</b> AWS handles backups and patching, and data no longer lives inside a container.</p></li>
+          <li data-n="5"><h4><span>STAGE 5</span>A safe for passwords<em class="plan">PLANNED</em></h4><p>Passwords go in AWS Secrets Manager. A helper in the cluster copies them in. <b>No password is ever written in Git or in a command.</b></p></li>
+          <li data-n="6"><h4><span>STAGE 6</span>Start the app<em class="plan">PLANNED</em></h4><p>Helm starts the five pods. A load balancer (ALB) appears and sends each request to the right pod by its path: <code>/</code>, <code>/auth</code>, <code>/api/v1</code>. <b>The ALB is the only way in.</b></p></li>
+          <li data-n="7"><h4><span>STAGE 7</span>The public front door<em class="plan">PLANNED</em></h4><p>CloudFront goes in front of the ALB. Then one DNS record points the domain name at CloudFront. <b>We set up CloudFront first so the DNS record is created once and never has to move.</b></p></li>
+          <li data-n="8"><h4><span>STAGE 8</span>Deploy by pull request<em class="plan">PLANNED</em></h4><p>Jenkins builds and pushes new images, then proposes a change in a Git repo. Argo CD in the cluster notices and applies it. <b>Jenkins never touches the cluster.</b></p></li>
+          <li data-n="9"><h4><span>STAGE 9</span>Polish<em class="plan">PLANNED</em></h4><p>Static files move to S3 and are served by CloudFront, so the frontend pod can retire. CloudWatch collects logs and alarms. <b>Do this last</b>; the app must be changed first.</p></li>
+        </ol>
+      </div>
+
+      <section id="overview"><div class="section-head"><div class="num">00</div><div><h2>The big picture</h2></div></div>
+        <p class="idea"><b>IN PLAIN WORDS</b>We take an app that runs on one machine and give each part a proper home in AWS: images in a registry, data in a managed database, passwords in a safe, and one guarded front door for users.</p>
+        <div class="cards">
+          <div class="card"><span class="big">1 cluster</span><p>EKS runs the five app pods on private servers.</p></div>
+          <div class="card m"><span class="big">1 namespace</span><p><code>trading</code>, holding one release named <code>demo</code>.</p></div>
+          <div class="card l"><span class="big">1 database</span><p>Private RDS PostgreSQL. Kafka stays in the cluster.</p></div>
+          <div class="card a"><span class="big">1 address</span><p><code>demo.apps.example.com</code> for the page and both APIs.</p></div>
+        </div>
+        <div class="gate warn"><strong>Before you create anything:</strong> confirm the AWS account is TTH, pick one region, and set a budget alert. Names like <code>example.com</code> and <code>&lt;placeholders&gt;</code> are yours to replace.</div>
+        <p class="small">Repo files used: <a href="k8s/cluster.yaml">cluster.yaml</a> · <a href="k8s/associate-stack/">Helm chart</a> · <a href="k8s/README.md">k8s notes</a> · <a href="RUNBOOK.html">local runbook</a></p>
+      </section>
+
+      <section id="done"><div class="section-head"><div class="num">01</div><div><h2>Docker and JFrog <span class="tag fx">DONE</span></h2><button class="jump" type="button" data-go="1">◆ Show on diagram · stage 1</button></div></div>
+        <p class="idea"><b>IN PLAIN WORDS</b>An image is a sealed box with the app and everything it needs. We build one box per service, label it <code>1.0</code>, and store it in a registry so other machines can fetch it.</p>
+        <div class="code-wrap"><div class="code-head"><span>1 · BUILD FOUR IMAGES</span><button class="copy" type="button">Copy</button></div><pre><code>docker build -t trading-frontend:1.0 -f sprint8/front-end/Dockerfile sprint8/front-end
+docker build -t trading-auth-service:1.0 -f sprint8-auth-service/Dockerfile sprint8-auth-service
+docker build -t trading-trade-api:1.0 -f sprint8/Dockerfile sprint8
+docker build -t trading-executor:1.0 -f executor/Dockerfile executor</code></pre></div>
+        <div class="code-wrap"><div class="code-head"><span>2 · LOG IN AND PUSH TO JFROG</span><button class="copy" type="button">Copy</button></div><pre><code>docker login trialzww0tc.jfrog.io --username '&lt;JFROG_USERNAME&gt;'
+# Type the access token at the prompt. Never put it in a command or file.
+for image in trading-frontend trading-auth-service trading-trade-api trading-executor; do
+  docker tag "${image}:1.0" "trialzww0tc.jfrog.io/fauxnance-docker/${image}:1.0" || exit $?
+  docker push "trialzww0tc.jfrog.io/fauxnance-docker/${image}:1.0" || exit $?
+done</code></pre></div>
+        <p class="small">Also done: removed the old <code>etp-testing-*:latest</code> images and stopped app containers. Kafka and Postgres containers are still running locally.</p>
+      </section>
+
+      <!-- ================= NETWORKING CONCEPT ================= -->
+      <section id="network"><div class="section-head"><div class="num">◆</div><div><h2>Localhost, service names, and CORS</h2></div></div>
+        <p class="idea"><b>IN PLAIN WORDS</b>An address only makes sense from where you are standing. <code>localhost</code> means "this same machine". Inside a container, "this machine" is the container itself, not your laptop and not the database next door.</p>
+
+        <figure class="concept">
+          <div class="bp-canvas">
+            <svg class="dg" viewBox="0 0 1200 440" role="img" aria-label="Two panels. In Docker Compose the browser sits outside Docker and calls localhost on three published ports, while containers call each other by service name. In EKS the browser calls one public address, the load balancer routes by path, and pods call each other by Service name.">
+              <!-- Panel A -->
+              <text class="pt" x="40" y="28">Docker Compose</text>
+              <g class="n"><rect x="60" y="45" width="470" height="50" rx="6"/><text class="t" x="295" y="66">Browser</text><text class="s" x="295" y="82">outside Docker · only knows localhost + a published port</text></g>
+              <rect class="z" x="40" y="150" width="525" height="250" rx="8"/><text class="zl" x="52" y="390">Docker network · containers find each other by name</text>
+              <g class="n"><rect x="60" y="190" width="130" height="48" rx="6"/><text class="t" x="125" y="210">frontend</text><text class="s" x="125" y="226">:4200</text></g>
+              <g class="n"><rect x="230" y="190" width="130" height="48" rx="6"/><text class="t" x="295" y="210">auth-service</text><text class="s" x="295" y="226">:3000</text></g>
+              <g class="n"><rect x="400" y="190" width="130" height="48" rx="6"/><text class="t" x="465" y="210">trade-api</text><text class="s" x="465" y="226">:8085</text></g>
+              <g class="n"><rect x="230" y="320" width="130" height="48" rx="6"/><text class="t" x="295" y="340">postgres</text><text class="s" x="295" y="356">:5432</text></g>
+              <g class="n"><rect x="400" y="320" width="130" height="48" rx="6"/><text class="t" x="465" y="340">kafka</text><text class="s" x="465" y="356">:29092</text></g>
+              <g class="e out"><path d="M125 95V190"/><text class="l big pk" x="132" y="128">localhost:4200</text></g>
+              <g class="e out"><path d="M295 95V190"/><text class="l big pk" x="302" y="128">localhost:3000</text></g>
+              <g class="e out"><path d="M465 95V190"/><text class="l big pk" x="472" y="128">localhost:8085</text></g>
+              <g class="e in"><path d="M295 238V320"/><text class="l big gr" x="302" y="284">postgres:5432</text></g>
+              <g class="e in"><path d="M465 238V320"/><text class="l big gr" x="472" y="284">kafka:29092</text></g>
+              <rect class="z bad" x="52" y="302" width="165" height="66" rx="6"/>
+              <text class="l rd" x="62" y="322">✗ localhost:5432</text><text class="l" x="62" y="339">from inside a container</text><text class="l" x="62" y="355">points at the container</text>
+              <text class="l big" x="40" y="425">Page on :4200 calls :3000 and :8085 → three different origins → CORS rules needed</text>
+
+              <!-- Panel B -->
+              <text class="pt" x="635" y="28">EKS</text>
+              <g class="n"><rect x="655" y="45" width="470" height="50" rx="6"/><text class="t" x="890" y="66">Browser</text><text class="s" x="890" y="82">outside the cluster · knows one public address</text></g>
+              <g class="n"><rect x="790" y="135" width="200" height="45" rx="6"/><text class="t" x="890" y="154">CloudFront → ALB</text><text class="s" x="890" y="170">routes by path</text></g>
+              <g class="e out"><path d="M890 95V135"/><text class="l big pk" x="897" y="120">https://demo.apps.example.com</text></g>
+              <rect class="z" x="635" y="215" width="525" height="185" rx="8"/><text class="zl" x="647" y="392">Cluster · pods find each other by Service name</text>
+              <g class="n"><rect x="655" y="245" width="130" height="48" rx="6"/><text class="t" x="720" y="265">frontend</text><text class="s" x="720" y="281">:4200</text></g>
+              <g class="n"><rect x="825" y="245" width="130" height="48" rx="6"/><text class="t" x="890" y="265">auth-service</text><text class="s" x="890" y="281">:3000</text></g>
+              <g class="n"><rect x="995" y="245" width="130" height="48" rx="6"/><text class="t" x="1060" y="265">order-service</text><text class="s" x="1060" y="281">:8085</text></g>
+              <g class="e out"><path class="nm" d="M890 180V200"/><path class="nm" d="M720 200H1060"/><path d="M720 200V245"/><path d="M890 200V245"/><path d="M1060 200V245"/><text class="l big pk" x="727" y="232">/</text><text class="l big pk" x="897" y="232">/auth</text><text class="l big pk" x="1067" y="232">/api/v1</text></g>
+              <g class="n"><rect x="825" y="335" width="130" height="42" rx="6"/><text class="t" x="890" y="353">RDS</text><text class="s" x="890" y="368">outside the cluster</text></g>
+              <g class="n"><rect x="995" y="335" width="130" height="42" rx="6"/><text class="t" x="1060" y="353">demo-kafka</text><text class="s" x="1060" y="368">:29092</text></g>
+              <g class="e in"><path d="M890 293V335"/><text class="l big gr" x="897" y="319">RDS endpoint</text></g>
+              <g class="e in"><path d="M1060 293V335"/><text class="l big gr" x="1067" y="319">demo-kafka</text></g>
+              <rect class="z good" x="647" y="312" width="165" height="64" rx="6"/>
+              <text class="l gr" x="657" y="332">✓ one address for</text><text class="l" x="657" y="348">the page and the APIs</text><text class="l" x="657" y="364">= one origin</text>
+              <text class="l big" x="635" y="425">Page and APIs share one host → same origin → no CORS needed</text>
+            </svg>
+          </div>
+          <div class="bp-legend"><span><i class="h"></i>call from the browser (outside)</span><span><i class="g"></i>call between servers (inside)</span></div>
+          <figcaption>Pink arrows start outside, so they need a public way in. Green arrows stay inside, so they use internal names. The pattern is the same in Docker and in Kubernetes; only the names change.</figcaption>
+        </figure>
+
+        <h3>Three rules</h3>
+        <div class="cards">
+          <div class="card l"><h4>1 · Server to server: use the name</h4><p>Docker gives every Compose service a name on its private network: <code>postgres</code>, <code>kafka</code>. Kubernetes does the same with Services: <code>demo-kafka</code>. The name always finds the right container, even if its IP changes.</p></div>
+          <div class="card m"><h4>2 · Browser to server: use the public door</h4><p>The browser is on your computer, outside Docker. It has never heard of <code>postgres</code> or <code>trade-api</code>. It can only use <code>localhost:PORT</code> (Compose publishes the port) or the public domain (EKS).</p></div>
+          <div class="card a"><h4>3 · Change settings, not code</h4><p>The code says "use <code>DB_HOST</code>, or <code>localhost</code> if not set". Compose and Helm set <code>DB_HOST</code> for us. Same image everywhere; only the environment variables change.</p></div>
+        </div>
+
+        <h3>Why not just keep localhost?</h3>
+        <p>Run on your laptop with no Docker, everything really is on one machine, so <code>localhost:5432</code> works. Put each service in its own container and each one becomes its own tiny machine. Now <code>localhost:5432</code> inside the trade API means "port 5432 inside the trade API container". Nothing is listening there, so the connection fails.</p>
+
+        <h3>Who calls whom, in each world</h3>
+        <div class="table-wrap"><table><thead><tr><th>Call</th><th>No Docker</th><th>Docker Compose</th><th>EKS</th></tr></thead><tbody>
+          <tr><td>Service → Postgres</td><td><code>localhost:5432</code></td><td><code>postgres:5432</code></td><td><code>&lt;rds-endpoint&gt;:5432</code></td></tr>
+          <tr><td>Service → Kafka</td><td><code>localhost:9092</code></td><td><code>kafka:29092</code></td><td><code>demo-kafka:29092</code></td></tr>
+          <tr><td>Browser → page</td><td><code>localhost:4200</code></td><td><code>localhost:4200</code></td><td><code>https://demo.apps.example.com/</code></td></tr>
+          <tr><td>Browser → auth</td><td><code>localhost:3000</code></td><td><code>localhost:3000</code></td><td><code>https://demo.apps.example.com/auth</code></td></tr>
+          <tr><td>Browser → trade API</td><td><code>localhost:8085</code></td><td><code>localhost:8085</code></td><td><code>https://demo.apps.example.com/api/v1</code></td></tr>
+          <tr><td>Where it is set</td><td>defaults in the code</td><td><code>environment:</code> in <code>docker-compose.yml</code></td><td><code>env:</code> in the Helm templates</td></tr>
+        </tbody></table></div>
+        <div class="gate new"><strong>The one that trips people up:</strong> <code>BACKEND_URL</code> and <code>AUTH_URL</code> are set on the frontend <em>container</em>, but Flask writes them into the HTML page and the <em>browser</em> uses them. So they must be addresses the browser can reach. <code>http://trade-api:8085</code> would be wrong here even though it works between containers. Compose leaves them at <code>localhost</code>; the Helm chart sets them to <code>https://demo.apps.example.com</code>.</div>
+        <p class="small">Kafka shows the same idea in one container: it listens on <code>kafka:29092</code> for other containers and on <code>localhost:9092</code> for tools on the host. And if you open the page from a different computer than the one running Docker, <code>localhost</code> is your computer, not the Docker host; use the host's address or an SSH tunnel.</p>
+
+        <h3>CORS in one minute</h3>
+        <p class="idea"><b>IN PLAIN WORDS</b>An <em>origin</em> is scheme + host + port. A web page may freely call its own origin. To call any other origin, the browser first asks that server, "do you allow pages from over there?" CORS is the server's answer. It is a browser safety rule only. Server-to-server calls never involve CORS.</p>
+        <div class="cards">
+          <div class="card m"><h4>Compose: CORS is needed</h4><p>The page comes from <code>http://localhost:4200</code>. It calls <code>:3000</code> and <code>:8085</code>. Different port means different origin, so both APIs must say "localhost:4200 is allowed".</p></div>
+          <div class="card l"><h4>EKS: CORS goes away</h4><p>Page, auth, and trade API all live under <code>https://demo.apps.example.com</code>. The load balancer splits them by path. Same origin, so the browser never asks. This is the reason we use one hostname with paths.</p></div>
+        </div>
+        <h3>Where the CORS settings live, and when to change them</h3>
+        <div class="table-wrap"><table><thead><tr><th>File</th><th>What it does today</th><th>Change it when</th></tr></thead><tbody>
+          <tr><td><code>sprint8/.../config/WebConfig.java:13</code></td><td>Trade API allows only <code>localhost:4200</code>, <code>127.0.0.1:4200</code>, and <code>frontend:4200</code>. The list is fixed in code.</td><td>You put the API on a different hostname than the page (for example <code>api.example.com</code>). Then add the page's public origin, ideally from an env var. The <code>frontend:4200</code> entry never helps: no browser ever sees that name.</td></tr>
+          <tr><td><code>sprint8/.../JwtAuthenticationFilter.java:65</code></td><td>On a 401 it always answers "allowed origin: <code>http://localhost:4200</code>".</td><td>Same case as above. On one shared hostname it is harmless.</td></tr>
+          <tr><td><code>sprint8-auth-service/src/init-app.ts:20</code></td><td>Auth service allows <em>any</em> origin, with cookies.</td><td>Before production. It works everywhere, but it is too open; limit it to your real origin.</td></tr>
+          <tr><td>Chart env <code>COOKIE_SAMESITE=lax</code>, <code>COOKIE_SECURE=true</code></td><td>The login cookie is sent only over HTTPS and only to the same site.</td><td>Only if page and API move to different sites. Then the cookie needs <code>SameSite=None</code>.</td></tr>
+        </tbody></table></div>
+        <div class="gate info"><strong>One thing to watch on EKS:</strong> the browser speaks HTTPS, but the load balancer talks plain HTTP to the pod. If the trade API ever answers <code>403 Invalid CORS request</code> when you place an order, Spring has mistaken that for a cross-origin call. Spring Boot normally reads the load balancer's forwarded headers on Kubernetes and gets it right. If not, set the env var <code>SERVER_FORWARD_HEADERS_STRATEGY=native</code> on the order service, or add the public origin to <code>WebConfig.java</code>.</div>
+      </section>
+
+      <section id="aws"><div class="section-head"><div class="num">02</div><div><h2>AWS login and tools</h2><button class="jump" type="button" data-go="2">◆ Show on diagram · stage 2</button></div></div>
+        <p class="idea"><b>IN PLAIN WORDS</b>Before building anything, prove to AWS who you are and double-check you are in the right account. Every later command uses this identity.</p>
+        <div class="gate"><strong>Wrong-account trap:</strong> this EC2 machine has its own AWS role. Without a profile, commands run as that role, not as TTH. Always check with <code>aws sts get-caller-identity</code>.</div>
+        <div class="code-wrap"><div class="code-head"><span>1 · LOG IN AS TTH</span><button class="copy" type="button">Copy</button></div><pre><code>aws configure --profile tth          # type the keys at the prompts
+# Using SSO instead?  aws configure sso --profile tth  &amp;&amp;  aws sso login --profile tth
+export AWS_PROFILE=tth
+export AWS_REGION=&lt;chosen-region&gt;
+aws sts get-caller-identity          # the Account must be the TTH account</code></pre></div>
+        <div class="code-wrap"><div class="code-head"><span>2 · INSTALL EKSCTL (LINUX X86_64)</span><button class="copy" type="button">Copy</button></div><pre><code>mkdir -p "$HOME/.local/bin"
+curl -fsSL https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_Linux_amd64.tar.gz \
+  -o /tmp/eksctl_Linux_amd64.tar.gz
+tar -xzf /tmp/eksctl_Linux_amd64.tar.gz -C "$HOME/.local/bin" eksctl
+export PATH="$HOME/.local/bin:$PATH"
+eksctl version</code></pre></div>
+        <p>Also install <code>kubectl</code> and Helm 3 from their official pages, then check with <code>kubectl version --client</code> and <code>helm version</code>.</p>
+        <div class="table-wrap"><table><thead><tr><th>Tool</th><th>What it is for</th></tr></thead><tbody><tr><td><code>aws</code></td><td>Talk to AWS.</td></tr><tr><td><code>eksctl</code></td><td>Create the cluster and its network in one command.</td></tr><tr><td><code>kubectl</code></td><td>Talk to the cluster: see pods, read logs.</td></tr><tr><td><code>helm</code></td><td>Install the app and add-ons as packages.</td></tr></tbody></table></div>
+      </section>
+
+      <section id="cluster"><div class="section-head"><div class="num">03</div><div><h2>Create the EKS cluster</h2><button class="jump" type="button" data-go="2">◆ Show on diagram · stage 2</button></div></div>
+        <p class="idea"><b>IN PLAIN WORDS</b>One command builds the whole empty house: a private network, a managed Kubernetes "brain", and the servers (nodes) that will run our pods. The nodes have no public address; they reach the internet only outward, through a NAT gateway.</p>
+        <p>First edit <a href="k8s/cluster.yaml">k8s/cluster.yaml</a>. It was written for a class of 140 people.</p>
+        <div class="table-wrap"><table><thead><tr><th>Setting</th><th>File says</th><th>Use for one person</th></tr></thead><tbody><tr><td><code>metadata.region</code></td><td><code>us-east-1</code></td><td>Your chosen region</td></tr><tr><td><code>metadata.version</code></td><td>not set</td><td>Pin a supported Kubernetes version</td></tr><tr><td>Node count</td><td>2 now, up to 50</td><td>1 (cheapest) or 2 (survives one node failing); max 2</td></tr></tbody></table></div>
+        <div class="code-wrap"><div class="code-head"><span>CREATE AND CHECK · TAKES ABOUT 15–20 MINUTES</span><button class="copy" type="button">Copy</button></div><pre><code>eksctl create cluster -f k8s/cluster.yaml
+aws eks update-kubeconfig --name trading-platform --region "$AWS_REGION" --profile tth
+kubectl get nodes -o wide                   # nodes should say Ready
+kubectl apply -f k8s/storageclass.yaml      # lets Kafka get an encrypted gp3 disk
+kubectl get storageclass</code></pre></div>
+        <p class="small">Size check: the five app pods ask for about 0.4 CPU and 1.2 GiB of memory in total. One <code>t3.large</code> (2 CPU, 8 GiB) fits them plus the add-ons.</p>
+      </section>
+
+      <section id="namespaces"><div class="section-head"><div class="num">04</div><div><h2>Create one namespace</h2></div></div>
+        <p class="idea"><b>IN PLAIN WORDS</b>A namespace is a labelled folder inside the cluster. Our app goes in one called <code>trading</code>, apart from the system tools.</p>
+        <div class="code-wrap"><div class="code-head"><span>ONE NAMESPACE</span><button class="copy" type="button">Copy</button></div><pre><code>kubectl create namespace trading
+kubectl get namespace trading</code></pre></div>
+        <p class="small">Skip <code>k8s/create-namespaces.sh</code>. It creates 30 team namespaces for the class setup.</p>
+      </section>
+
+      <section id="ecr"><div class="section-head"><div class="num">05</div><div><h2>Move images to ECR</h2><button class="jump" type="button" data-go="3">◆ Show on diagram · stage 3</button></div></div>
+        <p class="idea"><b>IN PLAIN WORDS</b>ECR is AWS's own image shelf. Because it lives in the same account as the cluster, the nodes can pull images using their built-in AWS identity. No registry password is needed inside the cluster.</p>
+        <div class="code-wrap"><div class="code-head"><span>1 · CREATE FOUR REPOSITORIES</span><button class="copy" type="button">Copy</button></div><pre><code>AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+ECR_REGISTRY="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
+for repo in trading-frontend trading-auth-service trading-trade-api trading-executor; do
+  aws ecr describe-repositories --region "$AWS_REGION" --repository-names "$repo" &gt;/dev/null 2&gt;&amp;1 || \
+  aws ecr create-repository --region "$AWS_REGION" --repository-name "$repo" \
+    --image-tag-mutability IMMUTABLE --image-scanning-configuration scanOnPush=true
+done</code></pre></div>
+        <div class="code-wrap"><div class="code-head"><span>2 · LOG IN, RETAG, PUSH</span><button class="copy" type="button">Copy</button></div><pre><code>aws ecr get-login-password --region "$AWS_REGION" \
+  | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+for image in trading-frontend trading-auth-service trading-trade-api trading-executor; do
+  docker tag "$image:1.0" "$ECR_REGISTRY/$image:1.0" || exit $?
+  docker push "$ECR_REGISTRY/$image:1.0" || exit $?
+done</code></pre></div>
+        <p><b>Immutable</b> means a tag can never be overwritten. A rebuilt image needs a new tag, such as <code>1.0.1</code>. That way <code>1.0</code> always means exactly one thing.</p>
+        <div class="gate new"><strong>Chart change 1 of 3:</strong> the chart always asks for a JFrog pull secret. With ECR there is none, so make that line optional in all four app <code>deployment.yaml</code> files.</div>
+        <div class="code-wrap"><div class="code-head"><span>k8s/associate-stack/templates/*/deployment.yaml</span><button class="copy" type="button">Copy</button></div><pre><code>    spec:
+      {{- with .Values.image.pullSecret }}
+      imagePullSecrets:
+        - name: {{ . }}
+      {{- end }}
+      containers:</code></pre></div>
+      </section>
+
+      <section id="rds"><div class="section-head"><div class="num">06</div><div><h2>Create the RDS database</h2><button class="jump" type="button" data-go="4">◆ Show on diagram · stage 4</button></div></div>
+        <p class="idea"><b>IN PLAIN WORDS</b>Containers come and go, so data must not live inside them. RDS is PostgreSQL run by AWS. We put it in the cluster's private network and add a firewall rule: only the cluster's servers may connect.</p>
+        <div class="code-wrap"><div class="code-head"><span>1 · FIND THE CLUSTER NETWORK, ADD THE FIREWALL RULE</span><button class="copy" type="button">Copy</button></div><pre><code>VPC_ID=$(aws eks describe-cluster --name trading-platform --region "$AWS_REGION" \
+  --query 'cluster.resourcesVpcConfig.vpcId' --output text)
+CLUSTER_SG=$(aws eks describe-cluster --name trading-platform --region "$AWS_REGION" \
+  --query 'cluster.resourcesVpcConfig.clusterSecurityGroupId' --output text)
+# List the private subnets. Note two IDs in different zones.
+aws ec2 describe-subnets --region "$AWS_REGION" \
+  --filters "Name=vpc-id,Values=$VPC_ID" "Name=tag:kubernetes.io/role/internal-elb,Values=1" \
+  --query 'Subnets[].[SubnetId,AvailabilityZone]' --output table
+RDS_SG=$(aws ec2 create-security-group --region "$AWS_REGION" --vpc-id "$VPC_ID" \
+  --group-name trading-rds --description 'Postgres from EKS nodes only' \
+  --query GroupId --output text)
+aws ec2 authorize-security-group-ingress --region "$AWS_REGION" --group-id "$RDS_SG" \
+  --protocol tcp --port 5432 --source-group "$CLUSTER_SG"</code></pre></div>
+        <div class="code-wrap"><div class="code-head"><span>2 · CREATE THE DATABASE SERVER</span><button class="copy" type="button">Copy</button></div><pre><code>aws rds create-db-subnet-group --region "$AWS_REGION" \
+  --db-subnet-group-name trading-private-db \
+  --db-subnet-group-description 'Private trading DB subnets' \
+  --subnet-ids &lt;private-subnet-a&gt; &lt;private-subnet-b&gt;
+aws rds create-db-instance --region "$AWS_REGION" \
+  --db-instance-identifier trading-db --engine postgres \
+  --db-instance-class db.t4g.micro --allocated-storage 20 --storage-type gp3 \
+  --storage-encrypted --db-subnet-group-name trading-private-db \
+  --vpc-security-group-ids "$RDS_SG" \
+  --master-username dbadmin --manage-master-user-password \
+  --backup-retention-period 7 --no-publicly-accessible
+aws rds wait db-instance-available --region "$AWS_REGION" --db-instance-identifier trading-db
+aws rds describe-db-instances --region "$AWS_REGION" --db-instance-identifier trading-db \
+  --query 'DBInstances[0].Endpoint.Address' --output text      # this is &lt;rds-endpoint&gt;</code></pre></div>
+        <p>AWS creates the <code>dbadmin</code> password and stores it in Secrets Manager. Look it up there when <code>psql</code> asks.</p>
+        <h3>Load the tables</h3>
+        <p>The database is private, so your terminal cannot reach it. We start a small helper pod <em>inside</em> the cluster and run <code>psql</code> from there.</p>
+        <div class="code-wrap"><div class="code-head"><span>3 · START A HELPER POD AND COPY THE SQL IN</span><button class="copy" type="button">Copy</button></div><pre><code># The repo schema has one line for a user named "postgres". RDS has no such user, so drop it.
+sed '/^ALTER ROLE postgres IN DATABASE/d' sprint8/db/schema.sql &gt; /tmp/schema-rds.sql
+
+kubectl -n trading run psql-client --image=postgres:16-alpine --restart=Never --command -- sleep 3600
+kubectl -n trading wait --for=condition=Ready pod/psql-client --timeout=120s
+kubectl -n trading cp /tmp/schema-rds.sql psql-client:/tmp/schema-rds.sql
+kubectl -n trading cp sprint8/db/seed-data.sql psql-client:/tmp/seed-data.sql
+kubectl -n trading exec -it psql-client -- sh</code></pre></div>
+        <div class="code-wrap"><div class="code-head"><span>4 · INSIDE THE POD: MAKE THE APP USER AND DATABASE</span><button class="copy" type="button">Copy</button></div><pre><code>psql -W "host=&lt;rds-endpoint&gt; port=5432 dbname=postgres user=dbadmin sslmode=require"
+
+CREATE ROLE trading_app LOGIN;
+\password trading_app
+GRANT trading_app TO CURRENT_USER;
+CREATE DATABASE trading_system_db OWNER trading_app;
+\q</code></pre></div>
+        <div class="code-wrap"><div class="code-head"><span>5 · INSIDE THE POD: TABLES, SAMPLE DATA, PERMISSIONS</span><button class="copy" type="button">Copy</button></div><pre><code>DB="host=&lt;rds-endpoint&gt; port=5432 dbname=trading_system_db user=dbadmin sslmode=require"
+psql -W "$DB" -f /tmp/schema-rds.sql
+psql -W "$DB" -f /tmp/seed-data.sql
+psql -W "$DB" &lt;&lt;'SQL'
+GRANT USAGE, CREATE ON SCHEMA auth, trading TO trading_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA auth, trading TO trading_app;
+GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA auth, trading TO trading_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA auth, trading
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO trading_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA auth, trading
+  GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO trading_app;
+ALTER ROLE trading_app IN DATABASE trading_system_db SET search_path TO trading, public;
+SQL
+exit</code></pre></div>
+        <div class="code-wrap"><div class="code-head"><span>6 · REMOVE THE HELPER POD</span><button class="copy" type="button">Copy</button></div><pre><code>kubectl -n trading delete pod psql-client</code></pre></div>
+        <p class="small">Two users on purpose: <code>dbadmin</code> owns the tables and is for humans; <code>trading_app</code> can only read and write rows and is what the app uses. If the app's password leaks, nobody can drop tables with it.</p>
+      </section>
+
+      <section id="secrets"><div class="section-head"><div class="num">07</div><div><h2>Store the secrets</h2><button class="jump" type="button" data-go="5">◆ Show on diagram · stage 5</button></div></div>
+        <p class="idea"><b>IN PLAIN WORDS</b>The app needs three secret values. We keep them in one AWS safe (Secrets Manager). A small helper in the cluster, External Secrets, is given a key to that one safe and keeps a copy fresh for the pods. Nothing secret is ever typed into Git, Helm, or Jenkins.</p>
+        <div class="table-wrap"><table><thead><tr><th>Key</th><th>What it is</th></tr></thead><tbody><tr><td><code>password</code></td><td>The <code>trading_app</code> database password from step 06.</td></tr><tr><td><code>jwt-secret</code></td><td>A long random string. Auth signs login tokens with it; the trade API checks them with it. Both must have the same value.</td></tr><tr><td><code>fauxnance-api-key</code></td><td>The key for the market-data API.</td></tr></tbody></table></div>
+        <div class="code-wrap"><div class="code-head"><span>1 · PUT THE VALUES IN THE SAFE</span><button class="copy" type="button">Copy</button></div><pre><code>umask 077
+"${EDITOR:-vi}" /tmp/trading-runtime.json
+# Type this in the editor, with real values:
+# {"password":"...","jwt-secret":"...","fauxnance-api-key":"..."}
+aws secretsmanager create-secret --region "$AWS_REGION" \
+  --name /trading/demo/runtime --secret-string file:///tmp/trading-runtime.json
+shred -u /tmp/trading-runtime.json</code></pre></div>
+        <div class="code-wrap"><div class="code-head"><span>2 · GIVE THE HELPER A KEY TO THAT ONE SAFE, THEN INSTALL IT</span><button class="copy" type="button">Copy</button></div><pre><code>AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+cat &gt; /tmp/eso-policy.json &lt;&lt;EOF
+{ "Version": "2012-10-17",
+  "Statement": [{ "Effect": "Allow",
+    "Action": ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"],
+    "Resource": "arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:/trading/demo/*" }] }
+EOF
+aws iam create-policy --policy-name trading-demo-eso-read --policy-document file:///tmp/eso-policy.json
+kubectl create namespace external-secrets
+eksctl create iamserviceaccount --cluster trading-platform --region "$AWS_REGION" \
+  --namespace external-secrets --name external-secrets \
+  --attach-policy-arn "arn:aws:iam::${AWS_ACCOUNT_ID}:policy/trading-demo-eso-read" --approve
+
+helm repo add external-secrets https://charts.external-secrets.io &amp;&amp; helm repo update
+helm upgrade --install external-secrets external-secrets/external-secrets \
+  --namespace external-secrets \
+  --set serviceAccount.create=false --set serviceAccount.name=external-secrets
+kubectl -n external-secrets rollout status deployment/external-secrets</code></pre></div>
+        <div class="code-wrap"><div class="code-head"><span>3 · TELL THE HELPER WHAT TO COPY · SAVE AS eso.yaml · kubectl apply -f eso.yaml</span><button class="copy" type="button">Copy</button></div><pre><code>apiVersion: external-secrets.io/v1
+kind: SecretStore
+metadata: { name: aws-secrets, namespace: trading }
+spec:
+  provider:
+    aws: { service: SecretsManager, region: &lt;chosen-region&gt; }
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata: { name: demo-runtime, namespace: trading }
+spec:
+  refreshInterval: 1h
+  secretStoreRef: { name: aws-secrets, kind: SecretStore }
+  target: { name: demo-runtime-secret }
+  dataFrom:
+    - extract: { key: /trading/demo/runtime }</code></pre></div>
+        <div class="code-wrap"><div class="code-head"><span>4 · CHECK IT WORKED (SHOWS KEY NAMES ONLY)</span><button class="copy" type="button">Copy</button></div><pre><code>kubectl -n trading get externalsecret demo-runtime        # STATUS should be SecretSynced
+kubectl -n trading describe secret demo-runtime-secret    # lists the 3 keys and sizes, not values</code></pre></div>
+        <p class="small">A Kubernetes Secret is only encoded, not encrypted, so limit who can read Secrets in <code>trading</code>. After changing a value in the safe, restart the pods so they pick it up.</p>
+      </section>
+
+      <section id="alb"><div class="section-head"><div class="num">08</div><div><h2>Install the load balancer controller</h2><button class="jump" type="button" data-go="6">◆ Show on diagram · stage 6</button></div></div>
+        <p class="idea"><b>IN PLAIN WORDS</b>Our pods are private. Something public must receive traffic and pass it in. This controller is a robot that watches the cluster; when our app says "I need a front door" (an <em>Ingress</em>), the robot builds an AWS load balancer for it.</p>
+        <div class="code-wrap"><div class="code-head"><span>INSTALL · USE THE VERSION FROM THE OFFICIAL GUIDE</span><button class="copy" type="button">Copy</button></div><pre><code>LBC_VERSION=&lt;pinned-controller-release-tag&gt;
+AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+# 1. Permission to create load balancers
+curl -fsSL -o /tmp/lbc-iam-policy.json \
+  "https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/${LBC_VERSION}/docs/install/iam_policy.json"
+aws iam create-policy --policy-name AWSLoadBalancerControllerIAMPolicy \
+  --policy-document file:///tmp/lbc-iam-policy.json
+eksctl create iamserviceaccount --cluster trading-platform --region "$AWS_REGION" \
+  --namespace kube-system --name aws-load-balancer-controller \
+  --attach-policy-arn "arn:aws:iam::${AWS_ACCOUNT_ID}:policy/AWSLoadBalancerControllerIAMPolicy" --approve
+
+# 2. The controller itself
+VPC_ID=$(aws eks describe-cluster --name trading-platform --region "$AWS_REGION" \
+  --query 'cluster.resourcesVpcConfig.vpcId' --output text)
+helm repo add eks https://aws.github.io/eks-charts &amp;&amp; helm repo update
+helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
+  --namespace kube-system \
+  --set clusterName=trading-platform --set region="$AWS_REGION" --set vpcId="$VPC_ID" \
+  --set serviceAccount.create=false --set serviceAccount.name=aws-load-balancer-controller
+kubectl -n kube-system rollout status deployment/aws-load-balancer-controller</code></pre></div>
+        <p class="small">Version and details: <a href="https://kubernetes-sigs.github.io/aws-load-balancer-controller/latest/deploy/installation/" target="_blank" rel="noreferrer">official installation guide</a>. Install this <em>before</em> the app; otherwise the app's Ingress waits forever for a load balancer.</p>
+      </section>
+
+      <section id="certs"><div class="section-head"><div class="num">09</div><div><h2>Get the HTTPS certificates</h2></div></div>
+        <p class="idea"><b>IN PLAIN WORDS</b>A certificate is what puts the padlock in the browser. AWS gives them free, but first you must prove you own the domain by adding one record to its DNS zone. We need two copies: one for the load balancer and one for CloudFront.</p>
+        <div class="table-wrap"><table><thead><tr><th>Certificate for</th><th>Must be in region</th><th>Used in</th></tr></thead><tbody><tr><td>Load balancer (ALB)</td><td>Your cluster region</td><td>Step 10</td></tr><tr><td>CloudFront</td><td>Always <code>us-east-1</code></td><td>Step 11</td></tr></tbody></table></div>
+        <p>You need the domain's hosted zone in Route 53 already. This step only adds a small <em>proof</em> record to it. The record that sends users to the site comes last, in step 12.</p>
+        <div class="code-wrap"><div class="code-head"><span>REQUEST BOTH, PROVE OWNERSHIP, WAIT</span><button class="copy" type="button">Copy</button></div><pre><code>CERT_ARN=$(aws acm request-certificate --region "$AWS_REGION" \
+  --domain-name 'demo.apps.example.com' --validation-method DNS \
+  --query CertificateArn --output text)
+CF_CERT_ARN=$(aws acm request-certificate --region us-east-1 \
+  --domain-name 'demo.apps.example.com' --validation-method DNS \
+  --query CertificateArn --output text)
+
+# Show the proof record. Add it to the hosted zone as a CNAME.
+aws acm describe-certificate --region "$AWS_REGION" --certificate-arn "$CERT_ARN" \
+  --query 'Certificate.DomainValidationOptions[0].ResourceRecord'
+aws acm describe-certificate --region us-east-1 --certificate-arn "$CF_CERT_ARN" \
+  --query 'Certificate.DomainValidationOptions[0].ResourceRecord'
+
+aws acm wait certificate-validated --region "$AWS_REGION" --certificate-arn "$CERT_ARN"
+aws acm wait certificate-validated --region us-east-1 --certificate-arn "$CF_CERT_ARN"</code></pre></div>
+        <p class="small">Both requests usually show the same proof record, so one CNAME covers both. If your cluster region is already <code>us-east-1</code>, one certificate serves both jobs.</p>
+      </section>
+
+      <section id="deploy"><div class="section-head"><div class="num">10</div><div><h2>Deploy the app with Helm</h2><button class="jump" type="button" data-go="6">◆ Show on diagram · stage 6</button></div></div>
+        <p class="idea"><b>IN PLAIN WORDS</b>Helm is an installer. The chart is the recipe; the <code>--set</code> flags are our choices: which images, which database, which domain. One command starts five pods and asks for the load balancer.</p>
+        <div class="gate new"><strong>Chart change 2 of 3:</strong> the load balancer checks each service by calling <code>/</code>. Our two APIs do not answer on <code>/</code>, so it would mark them broken and return <b>503</b>. Tell it the right page to check.</div>
+        <div class="code-wrap"><div class="code-head"><span>ADD ONE ANNOTATION TO TWO SERVICE FILES</span><button class="copy" type="button">Copy</button></div><pre><code># k8s/associate-stack/templates/auth-service/service.yaml
+metadata:
+  name: {{ include "associate-stack.id" . }}-auth-service
+  annotations:
+    alb.ingress.kubernetes.io/healthcheck-path: /docs/json
+
+# k8s/associate-stack/templates/order-service/service.yaml
+metadata:
+  name: {{ include "associate-stack.id" . }}-order-service
+  annotations:
+    alb.ingress.kubernetes.io/healthcheck-path: /health</code></pre></div>
+        <div class="code-wrap"><div class="code-head"><span>INSTALL · REPLACE THE PLACEHOLDERS</span><button class="copy" type="button">Copy</button></div><pre><code>ECR_REGISTRY="$(aws sts get-caller-identity --query Account --output text).dkr.ecr.$AWS_REGION.amazonaws.com"
+helm lint k8s/associate-stack
+helm upgrade --install demo k8s/associate-stack --namespace trading \
+  --set associateId=demo \
+  --set image.registry="$ECR_REGISTRY" --set image.tag=1.0 --set image.pullSecret='' \
+  --set database.host='&lt;rds-endpoint&gt;' \
+  --set database.name=trading_system_db --set database.user=trading_app \
+  --set jwt.secretName=demo-runtime-secret \
+  --set fauxnance.baseUrl='&lt;Fauxnance-HTTPS-API-base-url&gt;' \
+  --set frontend.baseDomain='apps.example.com' \
+  --set frontend.certificateArn="$CERT_ARN"</code></pre></div>
+        <div class="table-wrap"><table><thead><tr><th>Flag</th><th>Meaning</th></tr></thead><tbody><tr><td><code>associateId=demo</code> + <code>baseDomain=apps.example.com</code></td><td>The site becomes <code>demo.apps.example.com</code>; everything is named <code>demo-…</code>.</td></tr><tr><td><code>image.pullSecret=''</code></td><td>No registry password; nodes pull from ECR themselves.</td></tr><tr><td><code>jwt.secretName</code></td><td>The Secret from step 07. Only its <em>name</em> is passed, never a value.</td></tr><tr><td><code>fauxnance.baseUrl</code></td><td>The chart default is <code>localhost:8080</code>, which is wrong inside a pod (see the localhost section).</td></tr></tbody></table></div>
+        <div class="gate warn"><strong>Do not add <code>--wait</code>.</strong> Two pods wait for Kafka topics, and the topics are made by a job that Helm starts only after the install returns. With <code>--wait</code> each side waits for the other and the install times out.</div>
+        <div class="code-wrap"><div class="code-head"><span>WATCH IT COME UP</span><button class="copy" type="button">Copy</button></div><pre><code>kubectl -n trading get pods -w             # all five should reach Running, 1/1
+kubectl -n trading get ingress demo-trading   # ADDRESS shows the load balancer name
+kubectl -n trading get events --sort-by=.lastTimestamp | tail -20</code></pre></div>
+        <p class="small">Test it before any DNS exists: <code>curl -k -H 'Host: demo.apps.example.com' https://&lt;alb-address&gt;/auth/public-key</code></p>
+      </section>
+
+      <section id="cloudfront"><div class="section-head"><div class="num">11</div><div><h2>Put CloudFront in front</h2><button class="jump" type="button" data-go="7">◆ Show on diagram · stage 7</button></div></div>
+        <p class="idea"><b>IN PLAIN WORDS</b>CloudFront is AWS's global front desk. Users connect to a CloudFront location near them, and CloudFront passes the request to our load balancer. For now it forwards <em>everything</em>, unchanged. Later it can also serve static files from S3 without the address changing.</p>
+        <div class="cards">
+          <div class="card"><h4>Why before DNS?</h4><p>DNS should point at the final front door. If we pointed it at the load balancer now, we would have to change it again later. Build CloudFront first, point DNS once.</p></div>
+          <div class="card m"><h4>What users gain</h4><p>HTTPS at the edge, protection from traffic floods, and room to add caching and a firewall (WAF) later.</p></div>
+          <div class="card l"><h4>What does not change</h4><p>Still one hostname, still routed by path. So it is still one origin and CORS stays out of the picture.</p></div>
+        </div>
+        <h3>Create the distribution</h3>
+        <p>The console is easiest: CloudFront → Create distribution. Use these settings.</p>
+        <div class="table-wrap"><table><thead><tr><th>Setting</th><th>Value</th><th>Why</th></tr></thead><tbody>
+          <tr><td>Origin domain</td><td>The ALB address from step 10</td><td>Where CloudFront sends requests.</td></tr>
+          <tr><td>Origin protocol</td><td>HTTPS only</td><td>Keep the hop to the load balancer encrypted.</td></tr>
+          <tr><td>Viewer protocol</td><td>Redirect HTTP to HTTPS</td><td>Nobody uses plain HTTP.</td></tr>
+          <tr><td>Allowed methods</td><td>GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE</td><td>Login and orders are POST requests.</td></tr>
+          <tr><td>Cache policy</td><td><code>CachingDisabled</code></td><td>Pages and API answers differ per user. Never cache them.</td></tr>
+          <tr><td>Origin request policy</td><td><code>AllViewer</code></td><td>Passes cookies, the login token, and the <code>Host</code> name through.</td></tr>
+          <tr><td>Alternate domain name</td><td><code>demo.apps.example.com</code></td><td>The name users will type.</td></tr>
+          <tr><td>Certificate</td><td><code>$CF_CERT_ARN</code> (us-east-1)</td><td>The padlock for that name.</td></tr>
+        </tbody></table></div>
+        <div class="gate info"><strong>Why <code>AllViewer</code> matters:</strong> the load balancer only answers requests for the host <code>demo.apps.example.com</code>. If CloudFront did not pass the <code>Host</code> name along, the load balancer would return 404.</div>
+        <div class="code-wrap"><div class="code-head"><span>FIND THE CLOUDFRONT ADDRESS</span><button class="copy" type="button">Copy</button></div><pre><code>aws cloudfront list-distributions \
+  --query "DistributionList.Items[?Aliases.Items[0]=='demo.apps.example.com'].[Id,DomainName,Status]" \
+  --output table
+# When Status is Deployed, the DomainName looks like d1234abcd.cloudfront.net</code></pre></div>
+        <h3>Later: static files from S3</h3>
+        <p>Today the frontend is a Flask app that builds pages and also serves the analytics API, so it cannot simply be copied to S3. When it is split into plain static files, add S3 as a second origin for those files and keep <code>/auth</code> and <code>/api/v1</code> going to the load balancer. Users notice nothing; the address stays the same.</p>
+        <p class="small">Optional lock-down: limit the load balancer so it accepts traffic only from CloudFront (AWS publishes a managed prefix list for this). Then nobody can skip the front desk.</p>
+      </section>
+
+      <section id="dns"><div class="section-head"><div class="num">12</div><div><h2>Point the domain with Route 53</h2><button class="jump" type="button" data-go="7">◆ Show on diagram · stage 7</button></div></div>
+        <p class="idea"><b>IN PLAIN WORDS</b>DNS is the internet's phone book. This last step adds one entry: "<code>demo.apps.example.com</code> lives at this CloudFront address." After that, the name works for everyone.</p>
+        <div class="code-wrap"><div class="code-head"><span>ONE ALIAS RECORD → CLOUDFRONT</span><button class="copy" type="button">Copy</button></div><pre><code>cat &gt; /tmp/alias.json &lt;&lt;'EOF'
+{ "Changes": [{ "Action": "UPSERT", "ResourceRecordSet": {
+    "Name": "demo.apps.example.com", "Type": "A",
+    "AliasTarget": { "HostedZoneId": "Z2FDTNDATAQYW2",
+                     "DNSName": "&lt;dXXXX.cloudfront.net&gt;",
+                     "EvaluateTargetHealth": false } } }] }
+EOF
+aws route53 change-resource-record-sets --hosted-zone-id '&lt;your-hosted-zone-id&gt;' \
+  --change-batch file:///tmp/alias.json
+
+curl -sI https://demo.apps.example.com/ | head -5</code></pre></div>
+        <p class="small"><code>Z2FDTNDATAQYW2</code> is a fixed ID that means "CloudFront" in every alias record; it is not your zone. Add a second record with <code>"Type": "AAAA"</code> for IPv6.</p>
+      </section>
+
+      <section id="gitops"><div class="section-head"><div class="num">13</div><div><h2>GitOps with Argo CD</h2><button class="jump" type="button" data-go="8">◆ Show on diagram · stage 8</button></div></div>
+        <p class="idea"><b>IN PLAIN WORDS</b>Instead of a person running <code>helm</code>, we write down what should be running in a Git repo. Argo CD lives in the cluster, reads that repo, and makes the cluster match. To deploy, you change a file. To undo, you revert it.</p>
+        <div class="cards"><div class="card"><h4>App repo</h4><p>Source code, tests, Dockerfiles. "How to build it."</p></div><div class="card m"><h4>GitOps repo</h4><p>The chart and a values file with the image tag. "What should be running." No secrets.</p></div></div>
+        <div class="code-wrap"><div class="code-head"><span>GITOPS REPO LAYOUT</span><button class="copy" type="button">Copy</button></div><pre><code>trading-platform-gitops/
+  charts/associate-stack/           # a copy of k8s/associate-stack
+  environments/dev/values.yaml      # image tag, DB host, domain, certificate ARN
+  environments/dev/application.yaml # the Argo CD Application below</code></pre></div>
+        <div class="gate new"><strong>Chart change 3 of 3:</strong> under Argo CD the Kafka topics job would run only after every pod is healthy, but two pods are not healthy until the topics exist. Deadlock. Make the job run <em>during</em> the sync instead.</div>
+        <div class="code-wrap"><div class="code-head"><span>templates/kafka/topics-job.yaml · REPLACE THE THREE helm.sh/hook LINES</span><button class="copy" type="button">Copy</button></div><pre><code>  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation</code></pre></div>
+        <div class="code-wrap"><div class="code-head"><span>INSTALL ARGO CD</span><button class="copy" type="button">Copy</button></div><pre><code>helm repo add argo https://argoproj.github.io/argo-helm &amp;&amp; helm repo update
+helm upgrade --install argocd argo/argo-cd --namespace argocd --create-namespace
+kubectl -n argocd get pods</code></pre></div>
+        <div class="code-wrap"><div class="code-head"><span>environments/dev/application.yaml</span><button class="copy" type="button">Copy</button></div><pre><code>apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata: { name: demo, namespace: argocd }
+spec:
+  project: default
+  sources:
+    - repoURL: https://github.com/&lt;org&gt;/trading-platform-gitops.git
+      targetRevision: main
+      path: charts/associate-stack
+      helm:
+        releaseName: demo
+        valueFiles: [ $values/environments/dev/values.yaml ]
+    - repoURL: https://github.com/&lt;org&gt;/trading-platform-gitops.git
+      targetRevision: main
+      ref: values
+  destination: { server: https://kubernetes.default.svc, namespace: trading }
+  # Start with manual sync. Turn this on after a few clean syncs:
+  # syncPolicy: { automated: { prune: true, selfHeal: true } }</code></pre></div>
+        <p class="small">Before Argo's first sync, run <code>helm -n trading uninstall demo</code> so the release has one owner. The Kafka disk is kept.</p>
+      </section>
+
+      <section id="jenkins"><div class="section-head"><div class="num">14</div><div><h2>Jenkins builds the images</h2><button class="jump" type="button" data-go="8">◆ Show on diagram · stage 8</button></div></div>
+        <p class="idea"><b>IN PLAIN WORDS</b>Jenkins is the factory. On every code change it runs the tests, builds the four images, pushes them to ECR, and opens a pull request that says "please run this new tag". It never logs in to the cluster; Argo CD does the delivery.</p>
+        <div class="table-wrap"><table><thead><tr><th>What</th><th>Where it lives</th></tr></thead><tbody><tr><td>Region, registry address, image names</td><td>In the Jenkinsfile. Not secret.</td></tr><tr><td>AWS access</td><td>The build machine's own AWS role. No stored keys.</td></tr><tr><td>Permission to open the GitOps PR</td><td>Jenkins Credentials (a bot or GitHub App).</td></tr><tr><td>DB password, JWT secret, API key</td><td>Secrets Manager only. Jenkins never sees them.</td></tr></tbody></table></div>
+        <div class="code-wrap"><div class="code-head"><span>INSTALL ON A PRIVATE UBUNTU SERVER</span><button class="copy" type="button">Copy</button></div><pre><code>sudo apt update &amp;&amp; sudo apt install -y fontconfig openjdk-21-jre wget
+sudo install -d -m 0755 /etc/apt/keyrings
+sudo wget -O /etc/apt/keyrings/jenkins-keyring.asc \
+  https://pkg.jenkins.io/debian-stable/jenkins.io-2026.key
+echo "deb [signed-by=/etc/apt/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian-stable binary/" \
+  | sudo tee /etc/apt/sources.list.d/jenkins.list &gt; /dev/null
+sudo apt update &amp;&amp; sudo apt install -y jenkins
+sudo systemctl enable --now jenkins</code></pre></div>
+        <p class="small">Jenkins changes its signing key from time to time. Confirm the key file name on the Jenkins install page first. Keep port 8080 private; never open it to the internet.</p>
+        <div class="code-wrap"><div class="code-head"><span>JENKINSFILE STARTER</span><button class="copy" type="button">Copy</button></div><pre><code>pipeline {
+  agent { label 'docker-build-agent' }
+  options { timestamps(); disableConcurrentBuilds() }
+  environment {
+    AWS_REGION = '&lt;chosen-region&gt;'
+    AWS_ACCOUNT_ID = '&lt;target-account-id&gt;'
+    ECR_REGISTRY = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+    IMAGE_TAG = "${GIT_COMMIT.take(12)}"
+  }
+  stages {
+    stage('Test') {
+      // Replace with the real tests: mvn test, npm test
+      steps { sh 'echo "Add tests before publishing" &gt;&amp;2; exit 1' }
+    }
+    stage('Build and push') {
+      steps {
+        sh '''#!/usr/bin/env bash
+          set -euo pipefail
+          aws ecr get-login-password --region "$AWS_REGION" \\
+            | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+          docker build -t "$ECR_REGISTRY/trading-frontend:$IMAGE_TAG" -f sprint8/front-end/Dockerfile sprint8/front-end
+          docker build -t "$ECR_REGISTRY/trading-auth-service:$IMAGE_TAG" -f sprint8-auth-service/Dockerfile sprint8-auth-service
+          docker build -t "$ECR_REGISTRY/trading-trade-api:$IMAGE_TAG" -f sprint8/Dockerfile sprint8
+          docker build -t "$ECR_REGISTRY/trading-executor:$IMAGE_TAG" -f executor/Dockerfile executor
+          for image in trading-frontend trading-auth-service trading-trade-api trading-executor; do
+            docker push "$ECR_REGISTRY/$image:$IMAGE_TAG"
+          done
+        '''
+      }
+    }
+    stage('Propose release') {
+      steps { echo 'Open a GitOps PR that sets image.tag to IMAGE_TAG.' }
+    }
+  }
+}</code></pre></div>
+        <p class="small">The image tag is the Git commit ID, so every image traces back to the exact code that built it.</p>
+      </section>
+
+      <section id="checks"><div class="section-head"><div class="num">15</div><div><h2>Test it and roll back</h2></div></div>
+        <p class="idea"><b>IN PLAIN WORDS</b>Check from the outside in: does the door open, does each service answer, does an order travel all the way through Kafka to the database?</p>
+        <div class="code-wrap"><div class="code-head"><span>1 · FROM THE OUTSIDE</span><button class="copy" type="button">Copy</button></div><pre><code>curl -s -o /dev/null -w 'page   %{http_code}\n' https://demo.apps.example.com/
+curl -s -o /dev/null -w 'auth   %{http_code}\n' https://demo.apps.example.com/auth/public-key
+curl -s -o /dev/null -w 'orders %{http_code}\n' https://demo.apps.example.com/api/v1/accounts/1</code></pre></div>
+        <div class="table-wrap"><table><thead><tr><th>You see</th><th>It means</th></tr></thead><tbody><tr><td><code>200</code> for page and auth; <code>401</code> or <code>403</code> for orders</td><td>Good. Orders needs a login, so "not allowed" is the right answer.</td></tr><tr><td><code>503</code></td><td>The load balancer thinks the pods are unhealthy. Recheck chart change 2.</td></tr><tr><td><code>404</code> on everything</td><td>The <code>Host</code> name is not reaching the load balancer. Recheck the CloudFront <code>AllViewer</code> policy.</td></tr><tr><td><code>403 Invalid CORS request</code> on placing an order</td><td>See the note at the end of the CORS section.</td></tr></tbody></table></div>
+        <div class="code-wrap"><div class="code-head"><span>2 · FROM THE INSIDE</span><button class="copy" type="button">Copy</button></div><pre><code>kubectl -n trading get pods,pvc,svc,ingress
+kubectl -n trading logs deployment/demo-auth-service --tail=50
+kubectl -n trading logs deployment/demo-order-service --tail=50
+kubectl -n trading logs deployment/demo-trade-executor --tail=50
+
+# Kafka: are the 6 topics there, and is the executor listening?
+kubectl -n trading exec demo-kafka-0 -- /opt/kafka/bin/kafka-topics.sh \
+  --bootstrap-server localhost:29092 --list
+kubectl -n trading exec demo-kafka-0 -- /opt/kafka/bin/kafka-consumer-groups.sh \
+  --bootstrap-server localhost:29092 --describe --all-groups</code></pre></div>
+        <h3>3 · In a real browser</h3>
+        <ol class="steps"><li>Register a user, then log in.</li><li>Place an order.</li><li>See it fill (Kafka → executor → database).</li><li>Refresh the page: still logged in. Log out: cookie gone.</li></ol>
+        <p class="small">The analytics page will say "unavailable" in this setup. That is expected; see the review notes.</p>
+        <h3>Undo a bad release</h3>
+        <div class="code-wrap"><div class="code-head"><span>ROLL BACK</span><button class="copy" type="button">Copy</button></div><pre><code>helm -n trading history demo
+helm -n trading rollback demo &lt;revision&gt;
+# With GitOps: revert the pull request instead.</code></pre></div>
+      </section>
+
+      <section id="costs"><div class="section-head"><div class="num">16</div><div><h2>Cost and cleanup</h2></div></div>
+        <p class="idea"><b>IN PLAIN WORDS</b>Almost everything here bills by the hour, even when idle. Set a budget alert first, and delete in the reverse order you created.</p>
+        <div class="table-wrap"><table><thead><tr><th>Costs money while it exists</th><th>How to remove</th></tr></thead><tbody><tr><td>App + load balancer</td><td><code>helm -n trading uninstall demo</code> (do this first, so the ALB is deleted cleanly)</td></tr><tr><td>CloudFront, DNS record, certificates</td><td>Delete by hand in the console</td></tr><tr><td>RDS database</td><td>Delete by hand; take a snapshot if you need the data. A leftover RDS blocks deleting the network.</td></tr><tr><td>EKS cluster, nodes, NAT gateway</td><td><code>eksctl delete cluster -f k8s/cluster.yaml</code></td></tr><tr><td>ECR images, Secrets Manager secret, IAM policies</td><td>Delete by hand; <code>eksctl</code> does not touch them</td></tr></tbody></table></div>
+        <h3>This is a demo setup. For production, add:</h3>
+        <div class="table-wrap"><table><thead><tr><th>Area</th><th>Now</th><th>Production</th></tr></thead><tbody>
+          <tr><td>Copies of each service</td><td>1</td><td>2 or more, spread over zones</td></tr>
+          <tr><td>Kafka</td><td>1 broker, no encryption</td><td>3 brokers or Amazon MSK, with TLS</td></tr>
+          <tr><td>Database</td><td>1 zone</td><td>Multi-AZ with tested restores</td></tr>
+          <tr><td>Network rules</td><td>Any pod can call any pod</td><td>NetworkPolicies, plus a WAF on CloudFront</td></tr>
+          <tr><td>How it is built</td><td>Commands from this page</td><td>Terraform or CloudFormation, reviewed</td></tr>
+          <tr><td>Monitoring</td><td><code>kubectl logs</code></td><td>CloudWatch dashboards and alarms</td></tr>
+        </tbody></table></div>
+      </section>
+
+      <section id="review"><div class="section-head"><div class="num">RV</div><div><h2>Review notes</h2></div></div>
+        <p class="idea"><b>IN PLAIN WORDS</b>This guide was checked against the real chart and code in this repo. The design is sound for a demo. These are the things that were wrong or are still open.</p>
+        <div class="table-wrap"><table><thead><tr><th>Status</th><th>What</th><th>Where</th></tr></thead><tbody>
+          <tr><td><span class="tag td">TO DO</span></td><td>Chart change 1: make the pull secret optional.</td><td><a href="#ecr">05</a></td></tr>
+          <tr><td><span class="tag td">TO DO</span></td><td>Chart change 2: health-check paths, or the APIs return 503.</td><td><a href="#deploy">10</a></td></tr>
+          <tr><td><span class="tag td">TO DO</span></td><td>Chart change 3: topics job as a Sync hook, or Argo CD deadlocks.</td><td><a href="#gitops">13</a></td></tr>
+          <tr><td><span class="tag fx">FIXED</span></td><td>Order of steps: controller and certificate now come before the app; CloudFront before DNS.</td><td>08–12</td></tr>
+          <tr><td><span class="tag fx">FIXED</span></td><td>Test URLs pointed at pages that do not exist.</td><td><a href="#checks">15</a></td></tr>
+          <tr><td><span class="tag fx">FIXED</span></td><td>External Secrets used an old API version.</td><td><a href="#secrets">07</a></td></tr>
+          <tr><td><span class="tag fx">FIXED</span></td><td>No way to reach the private database; now uses a helper pod. Added a grant PostgreSQL 16 needs.</td><td><a href="#rds">06</a></td></tr>
+          <tr><td><span class="tag kn">KNOW</span></td><td>The frontend runs Flask's development server with debug on (<code>app.py:139</code>). Switch to a production server before sharing the link widely.</td><td>code</td></tr>
+          <tr><td><span class="tag kn">KNOW</span></td><td>Analytics page is unavailable: the data job is off and the two pods do not share a disk.</td><td>chart</td></tr>
+          <tr><td><span class="tag kn">KNOW</span></td><td>The trade executor has no health checks, so read its logs to confirm it works.</td><td>chart</td></tr>
+          <tr><td><span class="tag kn">KNOW</span></td><td>CORS allow-lists are fixed to localhost in code. Fine on one hostname.</td><td><a href="#network">CORS</a></td></tr>
+        </tbody></table></div>
+      </section>
+      <footer class="footer"><span>ETP Deployment Fieldbook · Check current AWS versions and prices before running.</span><a href="#top">Back to top ↑</a></footer>
+    </main>
+  </div>
+  <script>
+    document.documentElement.classList.add('js');
+
+    // Code blocks: tint comments and placeholders, then copy.
+    const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    for (const code of document.querySelectorAll('pre code')) {
+      code.innerHTML = code.textContent.split('\n').map(line => {
+        if (/^\s*(#(?!!)|--\s|\/\/)/.test(line)) return `<span class="c">${esc(line)}</span>`;
+        return esc(line).replace(/&lt;[A-Za-z][\w .:/-]*&gt;/g, m => `<span class="ph">${m}</span>`);
+      }).join('\n');
+    }
+    for (const button of document.querySelectorAll('.copy')) {
+      button.addEventListener('click', async () => {
+        const text = button.closest('.code-wrap').querySelector('pre').textContent;
+        try { await navigator.clipboard.writeText(text); }
+        catch { const helper = document.createElement('textarea'); helper.value = text; document.body.appendChild(helper); helper.select(); document.execCommand('copy'); helper.remove(); }
+        button.textContent = 'Copied'; window.setTimeout(() => { button.textContent = 'Copy'; }, 1300);
+      });
+    }
+
+    // Contents rail highlight and read progress.
+    const links = [...document.querySelectorAll('.toc a')];
+    const targets = links.map(link => document.querySelector(link.getAttribute('href'))).filter(Boolean);
+    const observer = new IntersectionObserver(entries => {
+      for (const entry of entries) if (entry.isIntersecting) {
+        for (const link of links) link.classList.toggle('active', link.getAttribute('href') === `#${entry.target.id}`);
+      }
+    }, { rootMargin: '-18% 0px -72% 0px' });
+    for (const target of targets) observer.observe(target);
+    const bar = document.getElementById('progress');
+    const onScroll = () => { const h = document.documentElement; bar.style.width = `${100 * h.scrollTop / Math.max(1, h.scrollHeight - h.clientHeight)}%`; };
+    addEventListener('scroll', onScroll, { passive: true }); onScroll();
+
+    // Staged architecture: data-s = stage an element appears, data-r = stage it is retired.
+    const bp = document.getElementById('blueprint');
+    const parts = [...bp.querySelectorAll('svg [data-s]')];
+    const stageButtons = [...bp.querySelectorAll('#bp-stages button')];
+    const notes = [...bp.querySelectorAll('#bp-notes li')];
+    const playBtn = document.getElementById('bp-play');
+    const LAST = 9; let stage = 1; let timer = null;
+    function setStage(n) {
+      stage = Math.max(0, Math.min(LAST, n));
+      for (const el of parts) {
+        const s = +el.dataset.s, r = el.dataset.r ? +el.dataset.r : 99;
+        el.classList.toggle('off', s > stage);
+        el.classList.toggle('new', s === stage && stage < r);
+        el.classList.toggle('old', stage >= r);
+      }
+      for (const b of stageButtons) b.setAttribute('aria-pressed', String(+b.dataset.go === stage));
+      for (const li of notes) li.classList.toggle('on', +li.dataset.n === stage);
+      document.getElementById('bp-n').textContent = stage;
+      const active = stageButtons[stage]; const strip = active.parentElement;
+      strip.scrollLeft = active.offsetLeft - strip.offsetLeft - 40;
+    }
+    function stop() { clearInterval(timer); timer = null; playBtn.textContent = '▶ Play'; }
+    function play() {
+      if (timer) return stop();
+      if (stage === LAST) setStage(0);
+      playBtn.textContent = '❚❚ Pause';
+      timer = setInterval(() => { if (stage >= LAST) return stop(); setStage(stage + 1); }, 3800);
+    }
+    for (const b of stageButtons) b.addEventListener('click', () => { stop(); setStage(+b.dataset.go); });
+    document.getElementById('bp-prev').addEventListener('click', () => { stop(); setStage(stage - 1); });
+    document.getElementById('bp-next').addEventListener('click', () => { stop(); setStage(stage + 1); });
+    playBtn.addEventListener('click', play);
+    bp.addEventListener('keydown', e => {
+      if (e.key === 'ArrowRight') { stop(); setStage(stage + 1); e.preventDefault(); }
+      if (e.key === 'ArrowLeft') { stop(); setStage(stage - 1); e.preventDefault(); }
+    });
+    for (const j of document.querySelectorAll('.jump')) j.addEventListener('click', () => {
+      stop(); setStage(+j.dataset.go); bp.scrollIntoView({ block: 'start' }); bp.focus({ preventScroll: true });
+    });
+    setStage(1);
+  </script>
+</body>
+</html>

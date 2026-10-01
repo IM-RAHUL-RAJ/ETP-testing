@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "associate-stack.id" . }}-auth-service
+  labels:
+    {{- include "associate-stack.labels" . | nindent 4 }}
+    app.kubernetes.io/name: auth-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: auth-service
+      app.kubernetes.io/instance: {{ include "associate-stack.id" . | quote }}
+  template:
+    metadata:
+      labels:
+        {{- include "associate-stack.labels" . | nindent 8 }}
+        app.kubernetes.io/name: auth-service
+    spec:
+      imagePullSecrets:
+        - name: {{ .Values.image.pullSecret }}
+      containers:
+        - name: auth-service
+          image: {{ include "associate-stack.image" (dict "Values" .Values "imageName" "trading-auth-service") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: PORT
+              value: "3000"
+            - name: DB_HOST
+              value: {{ .Values.database.host | quote }}
+            - name: DB_PORT
+              value: {{ .Values.database.port | quote }}
+            - name: DB_NAME
+              value: {{ .Values.database.name | quote }}
+            - name: DB_USER
+              value: {{ .Values.database.user | quote }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.jwt.secretName }}
+                  key: password
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.jwt.secretName }}
+                  key: jwt-secret
+            - name: JWT_ISSUER
+              value: {{ .Values.jwt.issuer | quote }}
+            - name: LOGIN_KEY_DIR
+              value: /tmp/login-keys
+            - name: COOKIE_SECURE
+              value: "true"
+            - name: COOKIE_SAMESITE
+              value: lax
+          startupProbe:
+            httpGet:
+              path: /docs/json
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /docs/json
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /docs/json
+              port: http
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.resources.authService | nindent 12 }}

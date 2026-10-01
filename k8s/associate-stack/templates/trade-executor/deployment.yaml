@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "associate-stack.id" . }}-trade-executor
+  labels:
+    {{- include "associate-stack.labels" . | nindent 4 }}
+    app.kubernetes.io/name: trade-executor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: trade-executor
+      app.kubernetes.io/instance: {{ include "associate-stack.id" . | quote }}
+  template:
+    metadata:
+      labels:
+        {{- include "associate-stack.labels" . | nindent 8 }}
+        app.kubernetes.io/name: trade-executor
+    spec:
+      imagePullSecrets:
+        - name: {{ .Values.image.pullSecret }}
+      initContainers:
+        - name: wait-for-kafka-topics
+          image: apache/kafka:3.8.0
+          command:
+            - /bin/sh
+            - -c
+            - until /opt/kafka/bin/kafka-topics.sh --bootstrap-server {{ include "associate-stack.id" . }}-kafka:29092 --describe --topic orders >/dev/null 2>&1; do echo waiting for Kafka topics; sleep 5; done
+      containers:
+        - name: trade-executor
+          image: {{ include "associate-stack.image" (dict "Values" .Values "imageName" "trading-executor") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8083
+          env:
+            - name: DB_HOST
+              value: {{ .Values.database.host | quote }}
+            - name: DB_PORT
+              value: {{ .Values.database.port | quote }}
+            - name: DB_NAME
+              value: {{ .Values.database.name | quote }}
+            - name: DB_USER
+              value: {{ .Values.database.user | quote }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.jwt.secretName }}
+                  key: password
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: {{ printf "%s-kafka:29092" (include "associate-stack.id" .) | quote }}
+            - name: FAUXNANCE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.jwt.secretName }}
+                  key: fauxnance-api-key
+            - name: FAUXNANCE_BASE_URL
+              value: {{ .Values.fauxnance.baseUrl | quote }}
+            - name: POLL_INTERVAL_SECONDS
+              value: {{ .Values.executor.pollIntervalSeconds | quote }}
+            - name: ETL_ENABLED
+              value: {{ .Values.executor.etlEnabled | quote }}
+            - name: ETL_PYTHON_SCRIPT_PATH
+              value: etl_trigger_service.py
+            - name: ETL_PYTHON_EXECUTABLE
+              value: python3
+            - name: DUCKDB_PATH
+              value: /tmp/analytics.duckdb
+            - name: PG_SCHEMA
+              value: trading
+          resources:
+            {{- toYaml .Values.resources.tradeExecutor | nindent 12 }}

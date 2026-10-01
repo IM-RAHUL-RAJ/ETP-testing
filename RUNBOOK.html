@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Tabbed ETP runbook: end-to-end verification, Docker containerization, Kafka, Postgres, registries, and ETL.">
+  <title>ETP | Operations Runbook</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root { color-scheme: light; --paper:#f2f5f0; --white:#fbfcf9; --ink:#172b27; --muted:#5d706a; --line:#d4ded6; --green:#b7d839; --teal:#08766c; --orange:#e56a42; --code:#152622; --code-text:#e7eee8; --mono:"DM Mono","SFMono-Regular",Consolas,monospace; --sans:"Manrope","Aptos",sans-serif; }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; scroll-padding-top:100px; }
+    body { margin:0; background:var(--paper); color:var(--ink); font:14px/1.65 var(--sans); }
+    body::before { position:fixed; inset:0; z-index:-1; pointer-events:none; content:""; background-image:linear-gradient(rgba(23,43,39,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(23,43,39,.025) 1px,transparent 1px); background-size:28px 28px; }
+    a { color:var(--teal); text-underline-offset:3px; } a:hover { color:var(--orange); }
+    button { font:inherit; } code,pre,kbd { font-family:var(--mono); }
+    code:not(pre code) { padding:2px 5px; border:1px solid var(--line); border-radius:4px; background:#e8eee8; font-size:.92em; }
+    .topbar { position:sticky; top:0; z-index:20; display:flex; align-items:center; justify-content:space-between; gap:14px; min-height:62px; padding:0 28px; border-bottom:1px solid var(--line); background:rgba(251,252,249,.96); backdrop-filter:blur(12px); }
+    .brand { display:flex; align-items:center; gap:10px; font-weight:800; white-space:nowrap; }
+    .brand-mark { display:grid; width:28px; height:28px; place-items:center; border-radius:6px; background:var(--ink); color:var(--green); font:500 12px var(--mono); }
+    .brand small { display:block; color:var(--muted); font:400 9px var(--mono); }
+    .tabs { display:flex; align-self:stretch; align-items:stretch; gap:4px; }
+    .tab { padding:0 13px; border:0; border-bottom:2px solid transparent; background:transparent; color:var(--muted); cursor:pointer; font:11px var(--mono); }
+    .tab:hover,.tab[aria-selected="true"] { border-bottom-color:var(--orange); color:var(--ink); }
+    .tab[aria-selected="true"] { font-weight:500; }
+    .state { display:flex; align-items:center; gap:8px; color:var(--muted); font:10px var(--mono); white-space:nowrap; }
+    .dot { width:8px; height:8px; border-radius:50%; background:var(--teal); box-shadow:0 0 0 4px rgba(8,118,108,.1); }
+    .panel[hidden] { display:none !important; }
+    .layout { display:grid; grid-template-columns:220px minmax(0,1fr); gap:38px; width:min(1440px,100%); margin:0 auto; padding:25px 30px 70px; }
+    .side { position:sticky; top:85px; align-self:start; max-height:calc(100vh - 105px); overflow:auto; padding:12px 0; }
+    .side-label { margin:0 0 12px 11px; color:var(--muted); font:10px var(--mono); letter-spacing:.08em; text-transform:uppercase; }
+    .side a { display:block; margin:2px 0; padding:6px 10px; border-left:2px solid transparent; border-radius:0 4px 4px 0; color:#4b605a; font-size:11px; text-decoration:none; }
+    .side a:hover,.side a.active { border-left-color:var(--teal); background:#e6ede6; color:var(--ink); }
+    .side-note { margin:20px 10px 0; padding-top:12px; border-top:1px solid var(--line); color:var(--muted); font-size:10px; }
+    main { min-width:0; max-width:1080px; }
+    .hero { display:grid; grid-template-columns:minmax(0,1.05fr) minmax(290px,.95fr); gap:22px; align-items:center; padding:17px 0 24px; border-bottom:1px solid var(--line); }
+    .eyebrow { display:flex; align-items:center; gap:9px; color:var(--teal); font:10px var(--mono); letter-spacing:.06em; text-transform:uppercase; }
+    .eyebrow::before { width:20px; height:2px; background:var(--orange); content:""; }
+    h1 { margin:12px 0 10px; font-size:clamp(34px,4vw,52px); line-height:1.05; letter-spacing:0; }
+    .hero-copy { max-width:610px; margin:0; color:var(--muted); font-size:13px; }
+    .chips { display:flex; flex-wrap:wrap; gap:7px; margin-top:15px; }
+    .chip { padding:4px 7px; border:1px solid var(--line); border-radius:4px; background:var(--white); color:var(--muted); font:9px var(--mono); }
+    .diagram { padding:14px; border:1px solid var(--line); border-radius:6px; background:var(--white); }
+    .diagram-title { display:flex; justify-content:space-between; margin-bottom:10px; color:var(--muted); font:9px var(--mono); text-transform:uppercase; }
+    .diagram-row { display:flex; align-items:center; gap:6px; margin:7px 0; }
+    .node { flex:1; min-width:0; padding:7px 5px; border:1px solid var(--line); border-radius:4px; background:#f4f7f2; text-align:center; }
+    .node b { display:block; overflow:hidden; font-size:9px; text-overflow:ellipsis; white-space:nowrap; }
+    .node small { color:var(--muted); font:8px var(--mono); }
+    .node.hot { border-color:#7ca79e; background:#e2f0e9; } .node.remote { border-color:#e7ac93; background:#fff0e8; }
+    .arrow { color:var(--orange); font:13px var(--mono); }
+    .diagram-foot { margin:8px 0 0; color:var(--muted); font-size:9px; }
+    .quick { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:17px 0 22px; }
+    .quick-item { padding:8px 10px; border-top:2px solid var(--green); background:rgba(251,252,249,.8); }
+    .quick-item b { display:block; font:10px var(--mono); } .quick-item span { color:var(--muted); font-size:10px; }
+    section { padding:27px 0 30px; border-top:1px solid var(--line); scroll-margin-top:88px; }
+    .section-head { display:grid; grid-template-columns:40px minmax(0,1fr); gap:11px; margin-bottom:15px; }
+    .section-no { padding-top:3px; color:var(--orange); font:11px var(--mono); }
+    h2 { margin:0; font-size:22px; line-height:1.25; } h3 { margin:19px 0 8px; font-size:14px; } h4 { margin:0 0 6px; font-size:12px; }
+    .intro { max-width:810px; margin:5px 0 0; color:var(--muted); font-size:12px; }
+    p { margin:8px 0; }
+    .split { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+    .note { min-width:0; padding:11px 13px; border-left:3px solid var(--green); background:rgba(251,252,249,.85); }
+    .note.teal { border-left-color:var(--teal); } .note.orange { border-left-color:var(--orange); } .note p:last-child { margin-bottom:0; }
+    .callout { margin:12px 0; padding:10px 13px; border:1px solid #dfb895; border-radius:5px; background:#fff4e9; color:#593b2b; }
+    .callout strong { color:#8d412c; } .callout.info { border-color:#a9c9c2; background:#e8f3ef; color:#254d45; }
+    .table-wrap { overflow-x:auto; margin:11px 0 15px; border:1px solid var(--line); border-radius:5px; background:var(--white); }
+    table { width:100%; border-collapse:collapse; font-size:10px; } th,td { padding:8px 10px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+    th { background:#e8eee8; color:#3c514b; font:9px var(--mono); text-transform:uppercase; } tr:last-child td { border-bottom:0; }
+    .code-wrap { overflow:hidden; margin:11px 0 15px; border:1px solid #2b433c; border-radius:5px; background:var(--code); }
+    .code-head { display:flex; justify-content:space-between; align-items:center; gap:8px; min-height:33px; padding:5px 9px 5px 12px; border-bottom:1px solid #344c44; color:#b2c2ba; font:9px var(--mono); }
+    .copy { padding:4px 7px; border:1px solid #688276; border-radius:4px; background:transparent; color:var(--code-text); cursor:pointer; font:9px var(--mono); }
+    .copy:hover { border-color:var(--green); color:var(--green); }
+    pre { overflow:auto; max-height:500px; margin:0; padding:12px 14px; color:var(--code-text); font:10px/1.65 var(--mono); tab-size:2; }
+    .steps { counter-reset:item; margin:10px 0; padding:0; list-style:none; }
+    .steps li { position:relative; min-height:30px; margin:0; padding:3px 0 10px 34px; border-left:1px solid var(--line); }
+    .steps li::before { position:absolute; top:0; left:-11px; display:grid; width:21px; height:21px; place-items:center; border:1px solid var(--line); border-radius:50%; background:var(--paper); color:var(--teal); content:counter(item); counter-increment:item; font:9px var(--mono); }
+    .steps li:last-child { border-left-color:transparent; }
+    .container-quick { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin:16px 0 22px; }
+    .container-quick .quick-item { padding:8px 10px; }
+    footer { display:flex; justify-content:space-between; gap:14px; padding:19px 0; border-top:1px solid var(--line); color:var(--muted); font-size:10px; }
+    @media (max-width:980px) { .layout { grid-template-columns:1fr; gap:8px; padding:15px 20px 45px; } .side { position:sticky; top:62px; z-index:10; display:flex; gap:3px; max-height:none; overflow-x:auto; padding:6px 0; border-bottom:1px solid var(--line); background:var(--paper); } .side-label,.side-note { display:none; } .side a { flex:0 0 auto; margin:0; padding:5px 8px; border:1px solid transparent; border-radius:4px; white-space:nowrap; } .side a.active { border-color:var(--line); } main { max-width:none; } }
+    @media (max-width:700px) { .topbar { min-height:56px; flex-wrap:wrap; gap:0 7px; padding:0 13px; } .tabs { order:3; flex-basis:100%; min-height:38px; justify-content:center; } .tab { padding:0 8px; font-size:9px; } .state { font-size:8px; } .layout { padding:10px 13px 34px; } .side { top:94px; } .hero { grid-template-columns:1fr; gap:15px; } h1 { font-size:36px; } h2 { font-size:19px; } .quick,.container-quick { grid-template-columns:repeat(2,1fr); } .split { grid-template-columns:1fr; } .section-head { grid-template-columns:30px minmax(0,1fr); gap:8px; } pre { font-size:9px; } footer { flex-direction:column; } }
+    @media (prefers-reduced-motion:reduce) { html { scroll-behavior:auto; } * { animation-duration:.01ms !important; transition-duration:.01ms !important; } }
+  </style>
+</head>
+<body>
+  <header class="topbar" id="top">
+    <div class="brand"><span class="brand-mark">ET</span><span>ETP Operations<small>FIELD RUNBOOK / ROOT COMPOSE STACK</small></span></div>
+    <div class="tabs" role="tablist" aria-label="Runbook sections">
+      <button class="tab" id="opsTab" type="button" role="tab" aria-selected="true" aria-controls="opsPanel" data-panel="opsPanel">Verify &amp; Test</button>
+      <button class="tab" id="containerTab" type="button" role="tab" aria-selected="false" aria-controls="containerPanel" data-panel="containerPanel">Containerize &amp; Ship</button>
+    </div>
+    <div class="state"><span class="dot"></span>ROOT STACK</div>
+  </header>
+
+  <div class="panel layout" id="opsPanel" role="tabpanel" aria-labelledby="opsTab">
+    <nav class="side" aria-label="Verification chapters">
+      <p class="side-label">Verify and test</p>
+      <a href="#start">Start</a><a href="#remote">EC2 browser</a><a href="#flow">System flow</a><a href="#postgres">Postgres</a><a href="#rds">RDS</a><a href="#kafka">Kafka</a><a href="#curl">Curl E2E</a><a href="#infra">Kafka setup</a><a href="#inventory">Files</a><a href="#env">Environment</a><a href="#etl">ETL</a><a href="#known">Known issues</a>
+      <p class="side-note">Run Docker commands on EC2 unless a block says otherwise. Use test accounts only; commands that place orders write persistent data.</p>
+    </nav>
+    <main>
+      <div class="hero">
+        <div><div class="eyebrow">Newcomer guide / verify every hop</div><h1>Trading platform<br>operations runbook</h1><p class="hero-copy">Follow a browser request through Auth, Trade API, Postgres, Kafka, executor, quote provider, and analytics. Query local Docker Postgres or AWS RDS.</p><div class="chips"><span class="chip">FRONTEND :4200</span><span class="chip">AUTH :3000</span><span class="chip">TRADE API :8085</span><span class="chip">KAFKA :9092</span></div></div>
+        <div class="diagram" role="img" aria-label="Browser through frontend, auth and trade API to Postgres and Kafka; executor gets quotes and emits trade events">
+          <div class="diagram-title"><span>Request path</span><span>01 / 07</span></div>
+          <div class="diagram-row"><div class="node"><b>Browser</b><small>localhost</small></div><span class="arrow">&gt;</span><div class="node hot"><b>Flask UI</b><small>:4200</small></div></div>
+          <div class="diagram-row"><div class="node hot"><b>Auth</b><small>:3000</small></div><span class="arrow">+</span><div class="node hot"><b>Trade API</b><small>:8085</small></div><span class="arrow">&gt;</span><div class="node hot"><b>Postgres</b><small>:5432</small></div></div>
+          <div class="diagram-row"><div class="node"><b>orders</b><small>Kafka</small></div><span class="arrow">&gt;</span><div class="node"><b>Executor</b><small>:8083</small></div><span class="arrow">&lt;&gt;</span><div class="node remote"><b>Fauxnance</b><small>HTTPS</small></div></div>
+          <div class="diagram-row"><div class="node"><b>trade-events</b><small>Kafka</small></div><span class="arrow">&gt;</span><div class="node"><b>DuckDB</b><small>shared /data</small></div></div>
+          <p class="diagram-foot">Browser calls published localhost ports; containers call each other by Compose service name.</p>
+        </div>
+      </div>
+      <div class="quick"><div class="quick-item"><b>4200 / UI</b><span>Register and dashboard</span></div><div class="quick-item"><b>3000 / Auth</b><span>JWT and sessions</span></div><div class="quick-item"><b>8085 / API</b><span>Orders and balances</span></div><div class="quick-item"><b>5432 / DB</b><span>auth + trading schemas</span></div><div class="quick-item"><b>9092 / Kafka host</b><span>Containers use kafka:29092</span></div><div class="quick-item"><b>8083 / Executor</b><span>Consumer, settlement, ETL</span></div></div>
+
+      <section id="start"><div class="section-head"><div class="section-no">00</div><div><h2>Start here</h2><p class="intro">The root <code>docker-compose.yml</code> is the stack covered in this guide.</p></div></div>
+        <div class="callout"><strong>Test environment only.</strong> Registration and market orders change the local database. Do not run order commands against a production account.</div>
+        <div class="code-wrap"><div class="code-head"><span>EC2 HOST / START AND CHECK SERVICES</span><button class="copy">Copy</button></div><pre><code>cd ~/ETP-testing
+docker-compose up -d --build
+docker-compose ps
+
+curl -i http://localhost:4200/
+curl -i http://localhost:8085/health
+curl -i http://localhost:3000/docs</code></pre></div>
+        <p>Forward ports <code>4200</code>, <code>3000</code>, and <code>8085</code> in VS Code's Ports panel when using Remote SSH. Open <code>http://localhost:4200</code>.</p>
+        <p class="small muted">Plain <code>docker-compose down</code> preserves named volumes. Avoid <code>docker-compose down -v</code> unless you intend to erase local database and analytics data.</p>
+      </section>
+
+      <section id="remote"><div class="section-head"><div class="section-no">00A</div><div><h2>Why EC2 public IP failed, and localhost worked</h2><p class="intro">VS Code Remote SSH leaves Docker running on EC2 and can tunnel selected remote ports to your computer.</p></div></div>
+        <div class="split"><div class="note orange"><h4>Direct public IP</h4><p>The EC2 security group may block inbound ports. Even if 4200 loads, browser JavaScript calls <code>localhost:3000</code> and <code>localhost:8085</code>; outside EC2, localhost means the visitor's own computer. The public-IP origin also fails this app's localhost CORS allowlist, and its Secure refresh cookie is not suitable for plain HTTP public-IP access.</p></div><div class="note teal"><h4>VS Code SSH forwarding</h4><p>Forwarded local ports travel through the SSH connection to the matching EC2 ports. Browser URLs remain localhost, so the browser API URLs, CORS allowlist, and local cookie behavior line up.</p></div></div>
+        <ol class="steps"><li>Connect to EC2 with VS Code Remote-SSH.</li><li>In the Ports panel, forward 4200, 3000, and 8085.</li><li>Open <code>http://localhost:4200</code> in the VS Code browser or your regular browser. Services still run in Docker on EC2.</li><li>Keep the SSH connection open while testing; use the forwarded address shown by VS Code if it selected a different local port.</li></ol>
+        <div class="callout"><strong>Production needs a different setup:</strong> HTTPS and a real hostname/reverse proxy, browser API URLs for that hostname, matching CORS origins, and Secure cookies. Keep Postgres and Kafka private.</div>
+      </section>
+
+      <section id="flow"><div class="section-head"><div class="section-no">01</div><div><h2>End-to-end request path</h2><p class="intro">The UI calls Auth and Trade API directly from the browser; database and Kafka traffic stays on the Docker network.</p></div></div>
+        <ol class="steps"><li>Register/login: Auth stores <code>auth.users</code>, creates <code>trading.account</code>, returns an access JWT, and stores a hashed refresh token.</li><li>Place order: Trade API inserts <code>trading.orders</code> with <code>NEW</code> status and publishes <code>ORDER_PLACED</code> to Kafka topic <code>orders</code>.</li><li>Executor consumes the event, fetches a Fauxnance quote, then fills/rejects the order and updates account/holding rows.</li><li>Executor publishes <code>TRADE_EXECUTED</code> or <code>TRADE_REJECTED</code> to <code>trade-events</code>.</li><li>DuckDB ETL reads Postgres periodically; the analytics frontend reads the shared DuckDB file.</li></ol>
+      </section>
+
+      <section id="postgres"><div class="section-head"><div class="section-no">02</div><div><h2>Postgres inside Docker</h2><p class="intro">Run from the EC2 host. You can also enter the database container and start <code>psql</code> directly.</p></div></div>
+        <div class="code-wrap"><div class="code-head"><span>EC2 HOST / OPEN PSQL</span><button class="copy">Copy</button></div><pre><code>docker exec -it trading-postgres psql -U postgres -d trading_system_db</code></pre></div>
+        <div class="code-wrap"><div class="code-head"><span>PSQL / LIST SCHEMAS AND TABLES</span><button class="copy">Copy</button></div><pre><code>\conninfo
+\dn
+\dt auth.*
+\dt trading.*
+\d+ auth.users
+\d+ auth.refresh_token
+\d+ trading.account
+\d+ trading.holding
+\d+ trading.instrument
+\d+ trading.orders</code></pre></div>
+        <div class="callout"><strong>Privacy:</strong> never select <code>password_hash</code> or <code>token_hash</code>. This schema has no login-attempt history table; refresh_token rows are session metadata.</div>
+        <div class="code-wrap"><div class="code-head"><span>PSQL / COUNTS FOR ALL CORE TABLES</span><button class="copy">Copy</button></div><pre><code>SELECT 'auth.users' AS table_name, COUNT(*) AS rows FROM auth.users
+UNION ALL SELECT 'auth.refresh_token', COUNT(*) FROM auth.refresh_token
+UNION ALL SELECT 'trading.account', COUNT(*) FROM trading.account
+UNION ALL SELECT 'trading.holding', COUNT(*) FROM trading.holding
+UNION ALL SELECT 'trading.instrument', COUNT(*) FROM trading.instrument
+UNION ALL SELECT 'trading.orders', COUNT(*) FROM trading.orders
+ORDER BY table_name;</code></pre></div>
+        <div class="code-wrap"><div class="code-head"><span>PSQL / USER, ACCOUNT, HOLDING, REFRESH SESSION</span><button class="copy">Copy</button></div><pre><code>SELECT u.user_id, u.username, u.email, u.created_on,
+       a.account_id, a.status, a.currency, a.cash_balance
+FROM auth.users u JOIN trading.account a USING (user_id)
+WHERE u.username = 'YOUR_USERNAME';
+
+SELECT ticker, quantity, average_price, as_of_date
+FROM trading.holding WHERE account_id = 5 ORDER BY ticker;
+
+SELECT rt.refresh_token_id, u.username, rt.created_on, rt.expires_at, rt.revoked_on
+FROM auth.refresh_token rt JOIN auth.users u USING (user_id)
+WHERE u.username = 'YOUR_USERNAME' ORDER BY rt.created_on DESC;</code></pre></div>
+        <div class="code-wrap"><div class="code-head"><span>PSQL / FIND ALL ORDERS FOR A USER</span><button class="copy">Copy</button></div><pre><code>SELECT o.order_id, u.username, o.account_id, o.ticker, o.side,
+       o.quantity, o.order_type, o.status, o.price,
+       o.executed_price, o.rejection_reason, o.received_at, o.executed_on
+FROM trading.orders o
+JOIN trading.account a USING (account_id)
+JOIN auth.users u USING (user_id)
+WHERE u.username = 'YOUR_USERNAME'
+ORDER BY o.received_at DESC;</code></pre></div>
+      </section>
+
+      <section id="rds"><div class="section-head"><div class="section-no">03</div><div><h2>Postgres on AWS RDS</h2><p class="intro">Use the same SQL after connecting. The RDS instance must already contain this app's auth/trading schemas.</p></div></div>
+        <div class="code-wrap"><div class="code-head"><span>EC2 HOST / CONNECT WITH TLS, PROMPT FOR PASSWORD</span><button class="copy">Copy</button></div><pre><code>export PGHOST='your-db.xxxxxx.region.rds.amazonaws.com'
+export PGPORT=5432
+export PGDATABASE=trading_system_db
+export PGUSER='your_db_user'
+export PGSSLMODE=require
+psql</code></pre></div>
+        <div class="callout info"><strong>Networking:</strong> allow TCP 5432 from the EC2 security group to the RDS security group. For a laptop, use a VPN/bastion or restricted network path; do not expose Postgres broadly to the internet.</div>
+        <p>For the application itself to use RDS, update the Compose service DB_HOST values and remove the local-Postgres dependency. Setting a host-shell variable alone does not override the root Compose file, which explicitly uses service name <code>postgres</code>.</p>
+      </section>
+
+      <section id="kafka"><div class="section-head"><div class="section-no">04</div><div><h2>Kafka topics, records, and your trade</h2><p class="intro">Kafka is the broker process inside the <code>trading-kafka</code> container. Run from the EC2 host with <code>docker exec</code>, or use <code>/opt/kafka/bin</code> directly when already inside it.</p></div></div>
+        <div class="table-wrap"><table><thead><tr><th>Topic</th><th>What it carries</th></tr></thead><tbody><tr><td><code>orders</code></td><td>Trade API <code>ORDER_PLACED</code> events.</td></tr><tr><td><code>trade-events</code></td><td>Executor fill/rejection events.</td></tr><tr><td><code>market-data</code></td><td>Poller quote-update events; currently has a publisher bug.</td></tr><tr><td><code>orders.DLT</code></td><td>Unprocessable order events.</td></tr><tr><td><code>trade-events.DLT</code></td><td>Unprocessable trade events.</td></tr><tr><td><code>market-data.DLT</code></td><td>Unprocessable quote events.</td></tr><tr><td><code>__consumer_offsets</code></td><td>Kafka internal committed consumer positions; not an app topic.</td></tr></tbody></table></div>
+        <div class="code-wrap"><div class="code-head"><span>EC2 HOST / LIST TOPICS AND PARTITIONS</span><button class="copy">Copy</button></div><pre><code>docker exec trading-kafka /opt/kafka/bin/kafka-topics.sh \\
+  --bootstrap-server localhost:9092 --list
+
+docker exec trading-kafka /opt/kafka/bin/kafka-topics.sh \\
+  --bootstrap-server localhost:9092 --describe --topic orders</code></pre></div>
+        <div class="code-wrap"><div class="code-head"><span>EC2 HOST / READ UP TO 10 RECORDS FROM EACH APP TOPIC</span><button class="copy">Copy</button></div><pre><code>for topic in orders orders.DLT trade-events trade-events.DLT market-data market-data.DLT; do
+  echo "=== $topic ==="
+  docker exec trading-kafka /opt/kafka/bin/kafka-console-consumer.sh \\
+    --bootstrap-server localhost:9092 --topic "$topic" \\
+    --from-beginning --max-messages 10 --timeout-ms 15000
+done</code></pre></div>
+        <p class="small muted">An empty topic may report <code>TimeoutException</code> and 0 records. That means no message arrived during the wait; a 3-second timeout is too short for consumer startup.</p>
+        <div class="code-wrap"><div class="code-head"><span>EC2 HOST / FIND A GOOG ORDER OR TRADE EVENT</span><button class="copy">Copy</button></div><pre><code>for topic in orders trade-events market-data; do
+  echo "=== $topic / GOOG ==="
+  docker exec trading-kafka /opt/kafka/bin/kafka-console-consumer.sh \\
+    --bootstrap-server localhost:9092 --topic "$topic" \\
+    --from-beginning --max-messages 1000 --timeout-ms 15000 2&gt;/dev/null \\
+    | grep -F 'GOOG' || echo "No GOOG message found in $topic"
+done</code></pre></div>
+        <div class="code-wrap"><div class="code-head"><span>EC2 HOST / EXECUTOR CONSUMER LAG</span><button class="copy">Copy</button></div><pre><code>docker exec trading-kafka /opt/kafka/bin/kafka-consumer-groups.sh \\
+  --bootstrap-server localhost:9092 --group trade-executor --describe</code></pre></div>
+        <p>Your GOOG test appeared in <code>orders</code> as <code>ORDER_PLACED</code> and in <code>trade-events</code> as <code>TRADE_EXECUTED</code>, order 19, filled at 337.32. A GOOG record in <code>market-data</code> is not expected until its publisher is fixed.</p>
+      </section>
+
+      <section id="curl"><div class="section-head"><div class="section-no">05</div><div><h2>Browser and curl end-to-end test</h2><p class="intro">This registers a unique disposable user, logs in, places one simulated order, then reads the API views. Run the block in one EC2 shell.</p></div></div>
+        <div class="callout"><strong>Writes test data.</strong> Registration persists the account; a filled order changes its cash/holdings. Never run this block against production.</div>
+        <div class="code-wrap"><div class="code-head"><span>EC2 HOST / REGISTER, LOGIN, PLACE ONE GOOG ORDER</span><button class="copy">Copy</button></div><pre><code>set -euo pipefail
+AUTH_URL=http://localhost:3000
+API_URL=http://localhost:8085
+USERNAME="runbook_$(date +%s)"
+EMAIL="${USERNAME}@example.com"
+TEST_PASSWORD='TestPass1234'
+
+curl -sS -w '\\nHTTP %{http_code}\\n' -X POST "$AUTH_URL/auth/register" \\
+  -H 'Content-Type: application/json' \\
+  -d "{\"firstName\":\"Runbook\",\"lastName\":\"Tester\",\"username\":\"$USERNAME\",\"email\":\"$EMAIL\",\"password\":\"$TEST_PASSWORD\",\"confirmPassword\":\"$TEST_PASSWORD\"}"
+
+LOGIN_JSON=$(curl -sS -X POST "$AUTH_URL/auth/login" \\
+  -H 'Content-Type: application/json' \\
+  -d "{\"identifier\":\"$USERNAME\",\"password\":\"$TEST_PASSWORD\"}")
+TOKEN=$(printf '%s' "$LOGIN_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["accessToken"])')
+ACCOUNT_ID=$(printf '%s' "$LOGIN_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["user"]["accountId"])')
+printf 'accountId=%s\\n' "$ACCOUNT_ID"
+
+curl -i "$API_URL/health"
+curl -sS "$AUTH_URL/auth/me" -H "Authorization: Bearer $TOKEN"
+ORDER_KEY="runbook-${USERNAME}-$(date +%s)"
+curl -sS -w '\\nHTTP %{http_code}\\n' -X POST "$API_URL/api/v1/orders" \\
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \\
+  -d "{\"accountId\":$ACCOUNT_ID,\"symbol\":\"GOOG\",\"side\":\"BUY\",\"quantity\":1,\"price\":0,\"orderType\":\"MARKET\",\"idempotencyKey\":\"$ORDER_KEY\"}"
+
+curl -sS "$API_URL/api/v1/accounts/$ACCOUNT_ID/orders" -H "Authorization: Bearer $TOKEN"
+curl -sS "$API_URL/api/v1/accounts/$ACCOUNT_ID/positions" -H "Authorization: Bearer $TOKEN"
+curl -sS "$API_URL/api/v1/accounts/$ACCOUNT_ID/balance" -H "Authorization: Bearer $TOKEN"</code></pre></div>
+        <div class="split"><div class="note teal"><h4>Browser journey</h4><p>Open <code>http://localhost:4200/register</code>, then <code>/login</code> and <code>/dashboard</code>. Forward 4200, 3000, and 8085 in VS Code.</p></div><div class="note orange"><h4>CORS preflight</h4><p>If the page loads but browser API calls fail, check the allowed origin:</p><code>curl -i -X OPTIONS http://localhost:8085/api/v1/orders -H 'Origin: http://localhost:4200' -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: authorization,content-type'</code></div></div>
+        <div class="code-wrap"><div class="code-head"><span>EC2 HOST / SERVICE LOGS</span><button class="copy">Copy</button></div><pre><code>docker-compose logs --tail=100 auth-service trade-api executor frontend kafka
+docker logs --tail=100 trading-executor</code></pre></div>
+      </section>
+
+      <section id="infra"><div class="section-head"><div class="section-no">06</div><div><h2>How Kafka infrastructure is created</h2><p class="intro">The root stack uses one Kafka 3.8 KRaft broker (no ZooKeeper) and a one-shot topic initializer.</p></div></div>
+        <ol class="steps"><li>Compose starts Kafka and waits until the broker health check passes.</li><li><code>kafka-init</code> waits for broker health, then creates topics with <code>--create --if-not-exists</code>.</li><li>It creates <code>orders</code> (3 partitions, 7 days), <code>trade-events</code> (3 partitions, 30 days), <code>market-data</code> (6 partitions, 1 day), plus one matching <code>.DLT</code> topic for each.</li><li>Trade API and executor start after the one-shot initializer exits successfully; auto topic creation is disabled.</li></ol>
+        <div class="code-wrap"><div class="code-head"><span>CHECK THE INITIALIZER AND TOPICS</span><button class="copy">Copy</button></div><pre><code>docker-compose ps
+docker-compose logs kafka-init
+docker exec trading-kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list</code></pre></div>
+        <p><code>infra/scripts/create-topics.sh</code> is an additional manual, idempotent script. Run from the repo root on EC2; it uses <code>docker exec</code> as a fallback:</p>
+        <div class="code-wrap"><div class="code-head"><span>EC2 HOST / MANUAL SCRIPT</span><button class="copy">Copy</button></div><pre><code>bash infra/scripts/create-topics.sh</code></pre></div>
+        <div class="callout"><strong>Name difference:</strong> root Compose creates the six <code>.DLT</code> topics. The manual script also creates legacy hyphenated names such as <code>orders-dlt</code>.</div>
+      </section>
+
+      <section id="inventory"><div class="section-head"><div class="section-no">07</div><div><h2>Compose and Dockerfiles by folder</h2><p class="intro">Use one stack at a time; the sprint snapshots reuse names and ports.</p></div></div>
+        <div class="table-wrap"><table><thead><tr><th>Path</th><th>Role</th></tr></thead><tbody><tr><td><code>docker-compose.yml</code></td><td>Active root stack: Postgres, Kafka/init, auth, trade API, executor, frontend.</td></tr><tr><td><code>sprint8/docker-compose.yml</code></td><td>Alternate Sprint 8 snapshot; different ports/layout.</td></tr><tr><td><code>sprint6/docker-compose.yml</code></td><td>Legacy Sprint 6 snapshot.</td></tr></tbody></table></div>
+        <div class="table-wrap"><table><thead><tr><th>Dockerfile</th><th>Component</th></tr></thead><tbody><tr><td><code>executor/Dockerfile</code></td><td>Java 21 executor plus Python ETL.</td></tr><tr><td><code>sprint8/Dockerfile</code></td><td>Sprint 8 Java trade API.</td></tr><tr><td><code>sprint8-auth-service/Dockerfile</code></td><td>Sprint 8 Node/NestJS auth.</td></tr><tr><td><code>sprint8/front-end/Dockerfile</code></td><td>Sprint 8 Flask frontend.</td></tr><tr><td><code>sprint6/Dockerfile</code></td><td>Legacy Java API.</td></tr><tr><td><code>sprint6/auth_server/Dockerfile</code></td><td>Legacy Node auth server.</td></tr><tr><td><code>sprint6/front-end/Dockerfile</code></td><td>Legacy Flask frontend.</td></tr></tbody></table></div>
+      </section>
+
+      <section id="env"><div class="section-head"><div class="section-no">08</div><div><h2>How environment variables load</h2><p class="intro">Compose reads the root <code>.env</code> for substitutions, then passes only variables declared in each service's <code>environment</code>.</p></div></div>
+        <ol class="steps"><li>Copy <code>.env.example</code> to an ignored root <code>.env</code>, then set local DB values, JWT secret, and a real Fauxnance key/base URL.</li><li>Compose substitutes <code>${NAME}</code> at container creation. A shell variable can override the file.</li><li>Java/Spring maps container variables through <code>application.yml</code>; NestJS reads <code>process.env</code>; Flask reads <code>os.getenv</code>.</li><li>Changing <code>.env</code> does not update an existing container; recreate affected services.</li></ol>
+        <div class="code-wrap"><div class="code-head"><span>SAFE CONFIG CHECK / DOES NOT PRINT THE KEY</span><button class="copy">Copy</button></div><pre><code>[[ -f .env ]] || cp .env.example .env
+# Edit .env; never put secrets in this HTML or Git.
+docker-compose up -d --force-recreate auth-service trade-api executor frontend
+docker exec trading-executor sh -c 'test -n "$FAUXNANCE_API_KEY" && echo "Fauxnance key is set"'</code></pre></div>
+        <div class="callout"><strong>Secrets:</strong> use unique production DB/JWT secrets and managed secret injection. Do not publish resolved <code>docker-compose config</code> output; it may reveal values. Root Compose hardcodes internal DB host <code>postgres</code>; a host export alone does not switch the stack to RDS.</div>
+      </section>
+
+      <section id="etl"><div class="section-head"><div class="section-no">09</div><div><h2>ETL and analytics flow</h2><p class="intro">The repository has more than one ETL entry point. Only the executor's DuckDB trigger is started by the root Compose stack.</p></div></div>
+        <ol class="steps"><li>With <code>ETL_ENABLED=true</code>, Spring's executor startup runner launches <code>etl_trigger_service.py</code>.</li><li>The trigger runs an initial pass, then repeats every <code>ETL_REFRESH_INTERVAL_SECONDS</code> (45 seconds by default).</li><li>Pipeline reads Postgres orders/accounts/instruments from <code>trading</code>, initializes DuckDB date/dimension tables, then loads facts after its watermark.</li><li>Rows are validated and deduplicated by source order ID; invalid rows are recorded for investigation; watermark advances after the pass.</li><li>Executor writes <code>/data/analytics.duckdb</code>; Compose mounts the same named <code>analytics_data</code> volume in the frontend.</li></ol>
+        <div class="code-wrap"><div class="code-head"><span>ETL / SETTINGS, LOG, SHARED FILE</span><button class="copy">Copy</button></div><pre><code>docker exec trading-executor sh -c 'printf "ETL_ENABLED=%s\\nETL_REFRESH_INTERVAL_SECONDS=%s\\nDUCKDB_PATH=%s\\n" "$ETL_ENABLED" "$ETL_REFRESH_INTERVAL_SECONDS" "$DUCKDB_PATH"'
+docker exec trading-executor tail -n 80 /app/etl_trigger_service.log
+docker exec trading-frontend python -c 'import os; p="/data/analytics.duckdb"; print("exists:", os.path.exists(p), "bytes:", os.path.getsize(p) if os.path.exists(p) else 0)'</code></pre></div>
+        <p><code>etl/duckdb_loader.py</code> is a separate standalone Postgres-to-DuckDB loader. <code>etl/main.py</code> is a separate Kafka trade-event aggregation consumer. Neither is a root Compose service.</p>
+      </section>
+
+      <section id="known"><div class="section-head"><div class="section-no">10</div><div><h2>Known behavior and quick diagnosis</h2><p class="intro">Use these distinctions to tell an empty topic from a service/network failure.</p></div></div>
+        <div class="table-wrap"><table><thead><tr><th>Observation</th><th>Meaning / check</th></tr></thead><tbody><tr><td><code>/health</code> returns <code>{"status":"UP"}</code></td><td>Trade API is reachable on 8085.</td></tr><tr><td>Kafka consumer timeout, 0 records</td><td>No record arrived before timeout; 15 seconds is safer for startup. Empty DLT topics commonly time out.</td></tr><tr><td>GOOG in <code>trade-events</code>, absent in <code>market-data</code></td><td>Order quote fetch publishes trade result separately from the scheduled market-data poller.</td></tr><tr><td><code>market-data</code> empty</td><td>Poller only fetches tickers with NEW orders. Also, current publisher uses <code>Map.of</code> with Fauxnance null bid/ask; Java throws before Kafka send.</td></tr><tr><td>Market order stays NEW/rejected</td><td>Check Fauxnance endpoint/key and executor logs; send <code>price: 0</code> on MARKET orders.</td></tr></tbody></table></div>
+        <div class="code-wrap"><div class="code-head"><span>EXECUTOR / QUOTE AND PUBLISH LOGS</span><button class="copy">Copy</button></div><pre><code>docker logs trading-executor 2&gt;&amp;1 | grep -E 'Fetching quote|Quote from API|Failed to publish market-data event|Market data poll failed'</code></pre></div>
+      </section>
+      <footer><span>ETP verification guide / root Compose stack</span><a href="#top">Back to top ^</a></footer>
+    </main>
+  </div>
+
+  <div class="panel layout" id="containerPanel" role="tabpanel" aria-labelledby="containerTab" hidden>
+    <nav class="side" aria-label="Containerization chapters"><p class="side-label">Container Lab</p><a href="#blueprint">Blueprint</a><a href="#dockerfiles">Dockerfiles</a><a href="#build">Build</a><a href="#network">Networking</a><a href="#inspect">Inspect</a><a href="#jfrog">JFrog</a><a href="#ecr">ECR</a><a href="#deploy">Pull and deploy</a><p class="side-note">Token-safe registry workflow. Do not bake credentials into images.</p></nav>
+    <main>
+      <div class="hero"><div><div class="eyebrow">Containerize / connect / publish / verify</div><h1>From source tree<br>to running images</h1><p class="hero-copy">A student field guide to Dockerfiles, Compose DNS, image lifecycle, JFrog Artifactory, and Amazon ECR, using this repository's component folders.</p><div class="chips"><span class="chip">BUILD CONTEXT</span><span class="chip">SERVICE DNS</span><span class="chip">REGISTRY TAGS</span></div></div>
+        <div class="diagram" role="img" aria-label="Source builds image, Compose connects containers, registries store versioned images"><div class="diagram-title"><span>Image journey</span><span>01 / 05</span></div><div class="diagram-row"><div class="node"><b>Source</b><small>Dockerfile</small></div><span class="arrow">&gt;</span><div class="node hot"><b>Local image</b><small>build / tag</small></div></div><div class="diagram-row"><div class="node hot"><b>Compose</b><small>service DNS</small></div><span class="arrow">&gt;</span><div class="node"><b>Run + verify</b><small>ps / logs / exec</small></div></div><div class="diagram-row"><div class="node remote"><b>JFrog</b><small>Docker repo</small></div><span class="arrow">&lt;&gt;</span><div class="node remote"><b>Amazon ECR</b><small>private registry</small></div></div><p class="diagram-foot">Same image layers; registry address and credentials differ.</p></div>
+      </div>
+      <div class="container-quick"><div class="quick-item"><b>Dockerfile</b><span>Build recipe per component</span></div><div class="quick-item"><b>Context</b><span>Files allowed to COPY</span></div><div class="quick-item"><b>Compose</b><span>Network + runtime config</span></div><div class="quick-item"><b>Registry</b><span>Versioned image storage</span></div></div>
+
+      <section id="blueprint"><div class="section-head"><div class="section-no">01</div><div><h2>Blueprint: one service, one image</h2><p class="intro">The repo already has per-component Dockerfiles and a root Compose stack. Dockerfiles normally belong at the root of each component folder, not all together in the repository root.</p></div></div>
+        <ol class="steps"><li>Choose a boundary: auth, trade API, executor, or frontend. Postgres and Kafka remain separate services.</li><li>Put the Dockerfile next to component source and choose a context that contains every <code>COPY</code> input.</li><li>Use multi-stage builds for compiled apps, minimal runtime dependencies, a non-root user, and the actual listening port.</li><li>Pass runtime config at container start. Never bake passwords, JWT secrets, or API keys into image layers.</li><li>Use Compose to put services on a private network; expose only ports needed from the host/browser.</li><li>Build, run, inspect, push a versioned tag, pull it elsewhere, and verify the same health endpoint.</li></ol>
+        <div class="callout info"><strong>Build context rule:</strong> <code>docker build -f path/to/Dockerfile -t name:tag CONTEXT</code>. The final argument controls what files Docker can access.</div>
+      </section>
+
+      <section id="dockerfiles"><div class="section-head"><div class="section-no">02</div><div><h2>Dockerfiles and folders</h2><p class="intro">These four build contexts are the active root stack's app images; the Sprint 6 files are legacy snapshots.</p></div></div>
+        <div class="table-wrap"><table><thead><tr><th>Image</th><th>Dockerfile</th><th>Build context</th><th>Runtime</th></tr></thead><tbody><tr><td><code>etp-trade-api</code></td><td><code>sprint8/Dockerfile</code></td><td><code>sprint8/</code></td><td>Java / 8085</td></tr><tr><td><code>etp-auth-service</code></td><td><code>sprint8-auth-service/Dockerfile</code></td><td><code>sprint8-auth-service/</code></td><td>Node / 3000</td></tr><tr><td><code>etp-executor</code></td><td><code>executor/Dockerfile</code></td><td><code>executor/</code></td><td>Java + Python / 8083</td></tr><tr><td><code>etp-frontend</code></td><td><code>sprint8/front-end/Dockerfile</code></td><td><code>sprint8/front-end/</code></td><td>Flask / 4200</td></tr></tbody></table></div>
+        <div class="table-wrap"><table><thead><tr><th>Other Dockerfile</th><th>Component</th></tr></thead><tbody><tr><td><code>sprint6/Dockerfile</code></td><td>Legacy Java API</td></tr><tr><td><code>sprint6/auth_server/Dockerfile</code></td><td>Legacy Node auth server</td></tr><tr><td><code>sprint6/front-end/Dockerfile</code></td><td>Legacy Flask UI</td></tr></tbody></table></div>
+      </section>
+
+      <section id="build"><div class="section-head"><div class="section-no">03</div><div><h2>Build and list images</h2><p class="intro">Manual commands make the image names explicit. Compose can also build all services from the root manifest.</p></div></div>
+        <div class="code-wrap"><div class="code-head"><span>EC2 HOST / BUILD ALL FOUR APPLICATION IMAGES</span><button class="copy">Copy</button></div><pre><code>VERSION=1.0.0
+docker build -f sprint8/Dockerfile -t etp-trade-api:$VERSION sprint8
+docker build -f sprint8-auth-service/Dockerfile -t etp-auth-service:$VERSION sprint8-auth-service
+docker build -f executor/Dockerfile -t etp-executor:$VERSION executor
+docker build -f sprint8/front-end/Dockerfile -t etp-frontend:$VERSION sprint8/front-end
+
+# Build from the root Compose file, then list local images.
+docker-compose build
+docker images
+docker image ls</code></pre></div>
+        <p>A built image is not running and is not pushed to a registry. <code>docker ps</code> lists running containers; <code>docker ps -a</code> includes stopped ones.</p>
+      </section>
+
+      <section id="network"><div class="section-head"><div class="section-no">04</div><div><h2>Compose networking: browser to container to container</h2><p class="intro">Browser and container traffic use different addresses.</p></div></div>
+        <div class="table-wrap"><table><thead><tr><th>Caller</th><th>Destination</th><th>Address</th></tr></thead><tbody><tr><td>Browser to UI</td><td>Published frontend port</td><td><code>localhost:4200</code></td></tr><tr><td>Browser JS to auth/API</td><td>Published host ports</td><td><code>localhost:3000</code> / <code>localhost:8085</code></td></tr><tr><td>Trade API to Postgres</td><td>Compose service name</td><td><code>postgres:5432</code></td></tr><tr><td>Executor to Kafka</td><td>Compose service name/internal listener</td><td><code>kafka:29092</code></td></tr></tbody></table></div>
+        <div class="code-wrap"><div class="code-head"><span>SIMPLIFIED COMPOSE SERVICE WIRING</span><button class="copy">Copy</button></div><pre><code>services:
+  postgres:
+    image: postgres:16-alpine
+    ports: ["5432:5432"]
+  kafka:
+    image: apache/kafka:3.8.0
+    ports: ["9092:9092"]
+  trade-api:
+    build: { context: ./sprint8, dockerfile: Dockerfile }
+    ports: ["8085:8085"]
+    environment:
+      DB_HOST: postgres
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    depends_on:
+      postgres:
+        condition: service_healthy</code></pre></div>
+        <div class="callout"><strong>Do not use localhost between containers.</strong> In a container, localhost refers to that same container. Compose DNS resolves service names on its private network. Browser JavaScript is outside Docker and cannot resolve names like <code>trade-api</code>.</div>
+      </section>
+
+      <section id="inspect"><div class="section-head"><div class="section-no">05</div><div><h2>Run, log, inspect, exec</h2><p class="intro">Use Compose for the full system; use Docker commands to investigate one container.</p></div></div>
+        <div class="code-wrap"><div class="code-head"><span>STATUS / LOGS / NETWORK</span><button class="copy">Copy</button></div><pre><code>docker-compose up -d --build
+docker-compose ps
+docker ps
+docker ps -a
+docker images
+
+docker logs -f trading-trade-api
+docker logs --tail=100 trading-executor
+docker-compose logs --tail=100 auth-service trade-api executor frontend
+
+docker inspect trading-trade-api
+docker network ls
+docker network inspect etp-testing_trading-network</code></pre></div>
+        <div class="code-wrap"><div class="code-head"><span>ENTER CONTAINERS AND VERIFY</span><button class="copy">Copy</button></div><pre><code># Kafka CLI from inside its container.
+docker exec -it trading-kafka bash
+/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list
+exit
+
+# SQL shell and app health checks.
+docker exec -it trading-postgres psql -U postgres -d trading_system_db
+docker exec trading-trade-api wget -qO- http://localhost:8085/health
+
+# Verify service DNS and TCP from the executor container.
+docker exec trading-executor python3 -c "import socket; [(print(host, socket.gethostbyname(host)), socket.create_connection((host, port), 4).close()) for host, port in [('postgres', 5432), ('kafka', 29092)]]"</code></pre></div>
+        <p class="small muted">Some minimal images have <code>sh</code> but not Bash. Use <code>docker exec -it NAME sh</code> unless Bash is known to be installed.</p>
+      </section>
+
+      <section id="jfrog"><div class="section-head"><div class="section-no">06</div><div><h2>JFrog Artifactory: create, push, pull</h2><p class="intro">Create a local Docker repository in JFrog Platform; use its exact registry hostname/repository path in Docker commands.</p></div></div>
+        <ol class="steps"><li>Open JFrog Platform Administration &gt; Repositories and create a Local repository with package type Docker (example key: <code>docker-local</code>).</li><li>Copy the Docker registry endpoint/prefix from your JFrog setup. Cloud and on-prem deployments may use different hostnames or reverse-proxy ports.</li><li>Create a least-privilege user/access token with deploy and read permission for that repository.</li><li>Authenticate with stdin, tag local images using the full repository path, push, then pull to verify.</li></ol>
+        <div class="code-wrap"><div class="code-head"><span>JFROG / LOGIN AND PUSH</span><button class="copy">Copy</button></div><pre><code>export JFROG_REGISTRY='your-company.jfrog.io'
+export JFROG_REPO_KEY='docker-local'
+export JFROG_USER='your-jfrog-user'
+export VERSION=1.0.0
+read -rsp 'JFrog access token: ' JFROG_TOKEN; printf '\\n'
+printf '%s' "$JFROG_TOKEN" | docker login "$JFROG_REGISTRY" --username "$JFROG_USER" --password-stdin
+unset JFROG_TOKEN
+
+for image in etp-trade-api etp-auth-service etp-executor etp-frontend; do
+  docker tag "$image:$VERSION" "$JFROG_REGISTRY/$JFROG_REPO_KEY/$image:$VERSION"
+  docker push "$JFROG_REGISTRY/$JFROG_REPO_KEY/$image:$VERSION"
+done</code></pre></div>
+        <div class="code-wrap"><div class="code-head"><span>JFROG / PULL</span><button class="copy">Copy</button></div><pre><code>docker pull "$JFROG_REGISTRY/$JFROG_REPO_KEY/etp-trade-api:$VERSION"
+docker pull "$JFROG_REGISTRY/$JFROG_REPO_KEY/etp-auth-service:$VERSION"
+docker pull "$JFROG_REGISTRY/$JFROG_REPO_KEY/etp-executor:$VERSION"
+docker pull "$JFROG_REGISTRY/$JFROG_REPO_KEY/etp-frontend:$VERSION"
+docker logout "$JFROG_REGISTRY"</code></pre></div>
+        <div class="callout info"><strong>Registry path varies by JFrog configuration.</strong> Use the exact Docker endpoint from your admin/repository setup. Do not add <code>https://</code> to <code>docker login</code>.</div>
+      </section>
+
+      <section id="ecr"><div class="section-head"><div class="section-no">07</div><div><h2>Amazon ECR: create, push, pull</h2><p class="intro">Use an approved AWS IAM role, SSO identity, or credential provider with ECR permissions.</p></div></div>
+        <div class="code-wrap"><div class="code-head"><span>AWS / IDENTITY AND REPOSITORY CREATION</span><button class="copy">Copy</button></div><pre><code>export AWS_REGION=eu-west-2
+aws sts get-caller-identity
+AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+ECR_REGISTRY="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
+
+for repo in etp-trade-api etp-auth-service etp-executor etp-frontend; do
+  if ! aws ecr describe-repositories --region "$AWS_REGION" --repository-names "$repo" >/dev/null 2>&1; then
+    aws ecr create-repository --region "$AWS_REGION" --repository-name "$repo" --image-scanning-configuration scanOnPush=true
+  fi
+done</code></pre></div>
+        <div class="code-wrap"><div class="code-head"><span>AWS ECR / LOGIN AND PUSH</span><button class="copy">Copy</button></div><pre><code>aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+for image in etp-trade-api etp-auth-service etp-executor etp-frontend; do
+  docker tag "$image:$VERSION" "$ECR_REGISTRY/$image:$VERSION"
+  docker push "$ECR_REGISTRY/$image:$VERSION"
+done</code></pre></div>
+        <div class="code-wrap"><div class="code-head"><span>AWS ECR / PULL</span><button class="copy">Copy</button></div><pre><code># Authenticate with the ECR login command above on this host first.
+docker pull "$ECR_REGISTRY/etp-trade-api:$VERSION"
+docker pull "$ECR_REGISTRY/etp-auth-service:$VERSION"
+docker pull "$ECR_REGISTRY/etp-executor:$VERSION"
+docker pull "$ECR_REGISTRY/etp-frontend:$VERSION"
+docker images</code></pre></div>
+        <p class="small muted">The IAM identity needs repository create/describe and image push/pull permissions. ECR login tokens expire; repeat login when required.</p>
+      </section>
+
+      <section id="deploy"><div class="section-head"><div class="section-no">08</div><div><h2>Pull, deploy, verify, roll back</h2><p class="intro">Pushing stores an image; deployment hosts still need to pull it, configure runtime values, and start services.</p></div></div>
+        <ol class="steps"><li>Use immutable version tags or commit SHAs, not only <code>latest</code>.</li><li>Authenticate to the registry and pull the exact image version on the target host.</li><li>In a deployment Compose file, use the full registry URI under <code>image:</code> instead of a local <code>build:</code> block.</li><li>Inject runtime settings/secrets, start the stack, inspect status/logs, and check health.</li><li>Keep the previous known-good tag for rollback; do not run the Sprint 6 and root stacks together.</li></ol>
+        <div class="code-wrap"><div class="code-head"><span>VERIFY RELEASE</span><button class="copy">Copy</button></div><pre><code>docker image inspect "$ECR_REGISTRY/etp-trade-api:$VERSION"
+docker-compose pull
+docker-compose up -d
+docker-compose ps
+docker-compose logs --tail=100 trade-api
+curl -i http://localhost:8085/health</code></pre></div>
+        <div class="callout"><strong>Security:</strong> never expose Postgres/Kafka publicly; use TLS, least privilege, managed secrets, image scanning, backups, and a rollback plan.</div>
+      </section>
+      <footer><span>Container Lab / second tab in this Runbook</span><a href="#top">Back to top ^</a></footer>
+    </main>
+  </div>
+
+  <script>
+    for (const button of document.querySelectorAll('.copy')) {
+      button.addEventListener('click', async () => {
+        const text = button.closest('.code-wrap').querySelector('pre').innerText;
+        try { await navigator.clipboard.writeText(text); }
+        catch { const helper=document.createElement('textarea'); helper.value=text; document.body.appendChild(helper); helper.select(); document.execCommand('copy'); helper.remove(); }
+        button.textContent='Copied'; window.setTimeout(() => { button.textContent='Copy'; }, 1400);
+      });
+    }
+    const tabs=[...document.querySelectorAll('.tab')];
+    for (const tab of tabs) tab.addEventListener('click', () => {
+      for (const item of tabs) {
+        const selected=item===tab;
+        item.setAttribute('aria-selected', String(selected));
+        document.getElementById(item.dataset.panel).hidden=!selected;
+      }
+      window.scrollTo({ top:0, behavior:'smooth' });
+    });
+    const links=[...document.querySelectorAll('.side a')];
+    const sections=links.map(link=>document.querySelector(link.getAttribute('href'))).filter(Boolean);
+    const observer=new IntersectionObserver(entries=>{
+      for (const entry of entries) if (entry.isIntersecting) {
+        for (const link of links) link.classList.toggle('active', link.getAttribute('href')===`#${entry.target.id}`);
+      }
+    }, { rootMargin:'-20% 0px -68% 0px' });
+    for (const section of sections) observer.observe(section);
+  </script>
+</body>
+</html>

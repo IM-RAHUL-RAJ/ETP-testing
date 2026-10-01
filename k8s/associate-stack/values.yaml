@@ -1,0 +1,69 @@
+associateId: replace-with-unique-associate-id
+
+image:
+  registry: trialzww0tc.jfrog.io/REPLACE_WITH_DOCKER_REPOSITORY_KEY
+  tag: "1.0"
+  pullPolicy: IfNotPresent
+  pullSecret: artifactory-pull-secret
+
+database:
+  host: replace-with-team-rds-endpoint
+  port: 5432
+  name: replace-with-associate-database
+  user: replace-with-associate-db-user
+
+jwt:
+  issuer: auth-service
+  secretName: replace-with-associate-runtime-secret
+
+fauxnance:
+  baseUrl: http://localhost:8080
+
+frontend:
+  baseDomain: replace-with-your-domain.example.com
+  certificateArn: replace-with-acm-certificate-arn
+  dashboardRefreshSeconds: 120
+
+executor:
+  etlEnabled: "false"
+  pollIntervalSeconds: "60"
+
+kafka:
+  storage: 2Gi
+
+resources:
+  frontend:
+    requests:
+      cpu: 25m
+      memory: 96Mi
+    limits:
+      cpu: 100m
+      memory: 256Mi
+  authService:
+    requests:
+      cpu: 50m
+      memory: 160Mi
+    limits:
+      cpu: 250m
+      memory: 384Mi
+  orderService:
+    requests:
+      cpu: 100m
+      memory: 320Mi
+    limits:
+      cpu: 500m
+      memory: 768Mi
+  tradeExecutor:
+    requests:
+      cpu: 100m
+      memory: 384Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  kafka:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi

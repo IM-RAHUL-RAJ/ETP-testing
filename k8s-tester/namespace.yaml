@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tester
+  labels:
+    app.kubernetes.io/part-of: trading-platform
+    environment: individual-test

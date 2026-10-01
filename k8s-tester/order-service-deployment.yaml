@@ -1,0 +1,92 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+  namespace: tester
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: order-service
+  template:
+    metadata:
+      labels:
+        app: order-service
+    spec:
+      imagePullSecrets:
+        - name: artifactory-pull-secret
+      initContainers:
+        - name: wait-for-kafka-topics
+          image: apache/kafka:3.8.0
+          command:
+            - /bin/sh
+            - -c
+            - until /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --describe --topic orders >/dev/null 2>&1; do echo waiting for Kafka topics; sleep 5; done
+      containers:
+        - name: order-service
+          image: trialzww0tc.jfrog.io/REPLACE_WITH_DOCKER_REPOSITORY_KEY/trading-trade-api:1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8085
+          env:
+            - name: DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: trading-config
+                  key: DB_HOST
+            - name: DB_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: trading-config
+                  key: DB_PORT
+            - name: DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: trading-config
+                  key: DB_NAME
+            - name: DB_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: trading-config
+                  key: DB_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: trading-secrets
+                  key: db-password
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: kafka:29092
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: trading-secrets
+                  key: jwt-secret
+            - name: JWT_ISSUER
+              valueFrom:
+                configMapKeyRef:
+                  name: trading-config
+                  key: JWT_ISSUER
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            failureThreshold: 36
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 320Mi
+            limits:
+              cpu: 500m
+              memory: 768Mi
