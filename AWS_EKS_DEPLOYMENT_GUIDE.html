@@ -192,10 +192,10 @@
 </head>
 <body>
   <div id="progress" aria-hidden="true"></div>
-  <header class="topbar" id="top"><div class="brand"><span class="mark">ETP</span><span>Deployment Fieldbook<small>AWS · EKS · DELIVERY PATH</small></span></div><div class="top-meta"><span class="pulse" aria-hidden="true"></span><span>CHECKED AGAINST REPO · 2026-10-01</span><span>· NO PASSWORDS IN THIS FILE</span></div></header>
+  <header class="topbar" id="top"><div class="brand"><span class="mark">ETP</span><span>Deployment Fieldbook<small>AWS · EKS · DELIVERY PATH</small></span></div><div class="top-meta"><span class="pulse" aria-hidden="true"></span><span>CHECKED AGAINST REPO · 2026-10-01</span><span>· NO REAL PASSWORDS IN THIS FILE</span></div></header>
   <div class="layout">
     <nav class="toc" aria-label="Guide contents"><p class="toc-label">The path</p>
-      <a href="#blueprint"><i>◆</i>Architecture build-up</a><a href="#overview"><i>00</i>Big picture</a><a href="#done"><i>01</i>Docker and JFrog</a><a href="#network"><i>◆</i>Localhost, names, CORS</a><a href="#aws"><i>02</i>AWS login and tools</a><a href="#cluster"><i>03</i>EKS cluster</a><a href="#namespaces"><i>04</i>Namespace</a><a href="#ecr"><i>05</i>ECR images</a><a href="#rds"><i>06</i>RDS database</a><a href="#secrets"><i>07</i>Secrets</a><a href="#alb"><i>08</i>Load balancer controller</a><a href="#certs"><i>09</i>Certificates</a><a href="#deploy"><i>10</i>Deploy the app</a><a href="#cloudfront"><i>11</i>CloudFront</a><a href="#dns"><i>12</i>Route 53 DNS</a><a href="#gitops"><i>13</i>GitOps</a><a href="#jenkins"><i>14</i>Jenkins</a><a href="#checks"><i>15</i>Test and roll back</a><a href="#costs"><i>16</i>Cost and cleanup</a><a href="#review"><i>RV</i>Review notes</a>
+      <a href="#blueprint"><i>◆</i>Architecture build-up</a><a href="#overview"><i>00</i>Big picture</a><a href="#done"><i>01</i>Docker and JFrog</a><a href="#network"><i>◆</i>Localhost, names, CORS</a><a href="#aws"><i>02</i>AWS login and tools</a><a href="#cluster"><i>03</i>EKS cluster</a><a href="#namespaces"><i>04</i>Namespace</a><a href="#ecr"><i>05</i>ECR images</a><a href="#rds"><i>06</i>RDS database</a><a href="#secrets"><i>07</i>Secrets</a><a href="#keys"><i>◆</i>Important secrets</a><a href="#alb"><i>08</i>Load balancer controller</a><a href="#certs"><i>09</i>Certificates</a><a href="#deploy"><i>10</i>Deploy the app</a><a href="#cloudfront"><i>11</i>CloudFront</a><a href="#dns"><i>12</i>Route 53 DNS</a><a href="#gitops"><i>13</i>GitOps</a><a href="#jenkins"><i>14</i>Jenkins</a><a href="#checks"><i>15</i>Test and roll back</a><a href="#costs"><i>16</i>Cost and cleanup</a><a href="#review"><i>RV</i>Review notes</a>
     </nav>
     <main>
       <div class="hero"><div class="eyebrow">From one machine to managed AWS</div><h1>Deploy the trading platform, <em>stage by stage.</em></h1><p class="lead">Each stage adds one piece. Click through the diagram first, then follow the numbered steps.</p></div>
@@ -577,6 +577,19 @@ exit</code></pre></div>
       <section id="secrets"><div class="section-head"><div class="num">07</div><div><h2>Store the secrets</h2><button class="jump" type="button" data-go="5">◆ Show on diagram · stage 5</button></div></div>
         <p class="idea"><b>IN PLAIN WORDS</b>The app needs three secret values. We keep them in one AWS safe (Secrets Manager). A small helper in the cluster, External Secrets, is given a key to that one safe and keeps a copy fresh for the pods. Nothing secret is ever typed into Git, Helm, or Jenkins.</p>
         <div class="table-wrap"><table><thead><tr><th>Key</th><th>What it is</th></tr></thead><tbody><tr><td><code>password</code></td><td>The <code>trading_app</code> database password from step 06.</td></tr><tr><td><code>jwt-secret</code></td><td>A long random string. Auth signs login tokens with it; the trade API checks them with it. Both must have the same value.</td></tr><tr><td><code>fauxnance-api-key</code></td><td>The key for the market-data API.</td></tr></tbody></table></div>
+        <h3 id="keys">Important secrets at a glance</h3>
+        <div class="table-wrap"><table><thead><tr><th>Setting</th><th>Used by</th><th>Local default (Docker only)</th><th>On EKS</th></tr></thead><tbody>
+          <tr><td><code>DB_PASSWORD</code></td><td>auth, trade API, executor → Postgres</td><td><code>postgres</code></td><td>The <code>trading_app</code> password, in Secrets Manager as <code>password</code></td></tr>
+          <tr><td><code>JWT_SECRET</code></td><td>auth signs tokens; trade API checks them</td><td><code>akatsuki_akatsuki_akatsuki_akatsuki_akatsuki</code></td><td>A new long random value, in Secrets Manager as <code>jwt-secret</code></td></tr>
+          <tr><td><code>FAUXNANCE_API_KEY</code></td><td>executor → market-data API</td><td><code>replace_with_fauxnance_api_key</code> (placeholder)</td><td>Your real key, in Secrets Manager as <code>fauxnance-api-key</code></td></tr>
+        </tbody></table></div>
+        <div class="gate"><strong>The local defaults are public.</strong> They sit in <code>.env.example</code> and <code>docker-compose.yml</code> in this repo, so anyone can read them. They are fine on your own machine and must never be used on EKS. Real values live only in your local <code>.env</code> (ignored by git) and in Secrets Manager. Never write a real value in this page.</div>
+        <div class="cards">
+          <div class="card"><h4>The JWT secret never expires</h4><p>It is the stamp, not the ticket. It keeps working until you change it. Changing it logs everyone out at once.</p></div>
+          <div class="card m"><h4>Tokens do expire</h4><p>Login token: 15 minutes (<code>JWT_TTL_SECONDS=900</code>). Refresh token: 7 days (<code>REFRESH_TTL_SECONDS=604800</code>).</p></div>
+          <div class="card a"><h4>Why it must stay secret</h4><p>Anyone who knows the JWT secret can create a valid login for any account, with no password.</p></div>
+        </div>
+        <div class="code-wrap"><div class="code-head"><span>MAKE A STRONG JWT SECRET</span><button class="copy" type="button">Copy</button></div><pre><code>openssl rand -base64 48</code></pre></div>
         <div class="code-wrap"><div class="code-head"><span>1 · PUT THE VALUES IN THE SAFE</span><button class="copy" type="button">Copy</button></div><pre><code>umask 077
 "${EDITOR:-vi}" /tmp/trading-runtime.json
 # Type this in the editor, with real values:
