@@ -15,9 +15,13 @@ pipeline {
     buildDiscarder(logRotator(numToKeepStr: '15'))
   }
 
-  // Look for new commits every five minutes. Polling needs no inbound
-  // connection, so Jenkins does not have to be reachable from GitHub.
-  triggers { pollSCM('H/5 * * * *') }
+  // GitHub calls http://<jenkins>:8080/github-webhook/ on every push, which
+  // starts a build within seconds. The slow poll is only a safety net for a
+  // missed call, for example while the box was stopped.
+  triggers {
+    githubPush()
+    pollSCM('H */2 * * *')
+  }
 
   environment {
     AWS_REGION = 'ap-south-1'
