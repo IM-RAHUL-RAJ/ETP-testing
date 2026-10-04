@@ -15,38 +15,12 @@ set -euo pipefail
 CLUSTER="${CLUSTER:-capstone}"
 REGION="${AWS_REGION:-ap-south-1}"
 NS=tester
-POLICY_NAME=AWSLoadBalancerControllerIAMPolicy
 cd "$(dirname "$0")/.."
 
-echo "==> 1/5 Helm"
-if ! command -v helm >/dev/null; then
-  curl -fsSL --http1.1 --retry 5 https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-fi
+echo "==> 1/3 AWS Load Balancer Controller"
+./scripts/install-lb-controller.sh
 
-echo "==> 2/5 IAM: let the worker nodes manage load balancers"
-ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
-POLICY_ARN="arn:aws:iam::${ACCOUNT}:policy/${POLICY_NAME}"
-if ! aws iam get-policy --policy-arn "$POLICY_ARN" >/dev/null 2>&1; then
-  curl -fsSL --http1.1 --retry 5 -o /tmp/alb-iam-policy.json \
-    https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/main/docs/install/iam_policy.json
-  aws iam create-policy --policy-name "$POLICY_NAME" --policy-document file:///tmp/alb-iam-policy.json >/dev/null
-fi
-NODEGROUP="$(aws eks list-nodegroups --cluster-name "$CLUSTER" --region "$REGION" --query 'nodegroups[0]' --output text)"
-NODE_ROLE="$(aws eks describe-nodegroup --cluster-name "$CLUSTER" --nodegroup-name "$NODEGROUP" --region "$REGION" \
-  --query 'nodegroup.nodeRole' --output text | awk -F/ '{print $NF}')"
-aws iam attach-role-policy --role-name "$NODE_ROLE" --policy-arn "$POLICY_ARN"
-
-echo "==> 3/5 AWS Load Balancer Controller"
-VPC_ID="$(aws eks describe-cluster --name "$CLUSTER" --region "$REGION" --query 'cluster.resourcesVpcConfig.vpcId' --output text)"
-helm repo add eks https://aws.github.io/eks-charts >/dev/null
-helm repo update eks >/dev/null
-helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
-  --namespace kube-system \
-  --set clusterName="$CLUSTER" --set region="$REGION" --set vpcId="$VPC_ID" \
-  --wait --timeout 5m
-kubectl -n kube-system rollout status deployment/aws-load-balancer-controller --timeout=5m
-
-echo "==> 4/5 Ingress on, four load balancers off"
+echo "==> 2/3 Ingress on, four load balancers off"
 # The controller's admission webhook can take a few seconds to accept calls.
 for attempt in 1 2 3 4 5 6; do
   kubectl apply -k k8s-ingress/ && break
@@ -57,7 +31,7 @@ done
 kubectl -n "$NS" rollout restart deployment/frontend
 kubectl -n "$NS" rollout status deployment/frontend --timeout=5m
 
-echo "==> 5/5 Waiting for the load balancer address"
+echo "==> 3/3 Waiting for the load balancer address"
 HOST=""
 for _ in $(seq 1 60); do
   HOST="$(kubectl -n "$NS" get ingress trading -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
