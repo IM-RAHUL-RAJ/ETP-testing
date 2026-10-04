@@ -1,0 +1,31 @@
+# Everything in ../k8s-tester, changed to sit behind one load balancer:
+# the four Services become internal, the Ingress is added, and the browser
+# is given relative addresses because page and APIs now share one hostname.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../k8s-tester
+  - ingress.yaml
+patches:
+  # Internal Services: this is what removes the four separate load balancers.
+  - target: {kind: Service, name: frontend}
+    patch: |-
+      - {op: replace, path: /spec/type, value: ClusterIP}
+  - target: {kind: Service, name: trade-executor}
+    patch: |-
+      - {op: replace, path: /spec/type, value: ClusterIP}
+  # The ALB checks "/" by default; these two do not answer 200 there.
+  - target: {kind: Service, name: auth-service}
+    patch: |-
+      - {op: replace, path: /spec/type, value: ClusterIP}
+      - {op: add, path: /metadata/annotations, value: {alb.ingress.kubernetes.io/healthcheck-path: /docs/json}}
+  - target: {kind: Service, name: order-service}
+    patch: |-
+      - {op: replace, path: /spec/type, value: ClusterIP}
+      - {op: add, path: /metadata/annotations, value: {alb.ingress.kubernetes.io/healthcheck-path: /health}}
+  # Empty means "same address as the page", so nothing has to be filled in
+  # after the load balancer exists and set-urls.sh is no longer needed.
+  - target: {kind: ConfigMap, name: trading-config}
+    patch: |-
+      - {op: replace, path: /data/AUTH_URL, value: ""}
+      - {op: replace, path: /data/BACKEND_URL, value: ""}

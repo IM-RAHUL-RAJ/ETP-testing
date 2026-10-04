@@ -1,0 +1,45 @@
+# One public load balancer (an AWS Application Load Balancer) in front of the
+# whole application. The AWS Load Balancer Controller reads this object and
+# builds the ALB; each rule below becomes a routing rule on it.
+#
+#   /auth/...    -> auth-service:3000
+#   /api/v1/...  -> order-service:8085   (the trade API)
+#   everything else -> frontend:4200
+#
+# The executor is not listed: the browser never calls it.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: trading
+  namespace: tester
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    # Send traffic straight to pod addresses, so the Services can stay internal.
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
+spec:
+  ingressClassName: alb
+  rules:
+    - http:
+        paths:
+          - path: /auth
+            pathType: Prefix
+            backend:
+              service:
+                name: auth-service
+                port:
+                  number: 3000
+          - path: /api/v1
+            pathType: Prefix
+            backend:
+              service:
+                name: order-service
+                port:
+                  number: 8085
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 4200
