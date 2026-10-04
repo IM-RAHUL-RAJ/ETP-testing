@@ -4,7 +4,6 @@ resources:
   - namespace.yaml
   - storageclass.yaml
   - configmap.yaml
-  - analytics-pvc.yaml
   - frontend-deployment.yaml
   - frontend-service.yaml
   - auth-service-deployment.yaml

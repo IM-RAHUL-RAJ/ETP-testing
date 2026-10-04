@@ -54,10 +54,3 @@ spec:
             limits:
               cpu: 100m
               memory: 256Mi
-          volumeMounts:
-            - name: analytics-data
-              mountPath: /data
-      volumes:
-        - name: analytics-data
-          persistentVolumeClaim:
-            claimName: analytics-data

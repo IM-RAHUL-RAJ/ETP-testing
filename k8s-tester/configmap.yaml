@@ -11,7 +11,7 @@ data:
   JWT_ISSUER: auth-service
   KAFKA_BOOTSTRAP_SERVERS: kafka:29092
   POLL_INTERVAL_SECONDS: "60"
-  ETL_ENABLED: "true"
+  ETL_ENABLED: "false"
   ETL_REFRESH_INTERVAL_SECONDS: "45"
   DUCKDB_PATH: /data/analytics.duckdb
   PG_SCHEMA: trading
