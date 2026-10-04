@@ -15,9 +15,10 @@ pipeline {
     buildDiscarder(logRotator(numToKeepStr: '15'))
   }
 
-  // "Build with Parameters" lets a build pick its branch. The job's Branch
-  // Specifier is */${BRANCH}, so the Jenkinsfile and code both come from it.
-  // Webhook and polling builds use the default.
+  // "Build with Parameters" lets a build pick its branch. The job itself
+  // always tracks */main (a parameter there stops the webhook check from
+  // seeing new commits); the "Select branch" stage switches the workspace
+  // when another branch is asked for. Webhook builds use the default.
   parameters {
     string(name: 'BRANCH', defaultValue: 'main', description: 'Branch to build and deploy')
   }
@@ -35,6 +36,16 @@ pipeline {
   }
 
   stages {
+    stage('Select branch') {
+      when { expression { params.BRANCH && params.BRANCH != 'main' } }
+      steps {
+        sh '''
+          git fetch --no-tags origin "+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"
+          git checkout -f "origin/${BRANCH}"
+        '''
+      }
+    }
+
     // Tests run in throwaway containers, so the box needs no Java or Node.
     stage('Test trade API') {
       steps {
