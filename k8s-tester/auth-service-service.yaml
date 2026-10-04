@@ -4,7 +4,7 @@ metadata:
   name: auth-service
   namespace: tester
 spec:
-  type: ClusterIP
+  type: LoadBalancer
   selector:
     app: auth-service
   ports:

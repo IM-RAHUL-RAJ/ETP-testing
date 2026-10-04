@@ -4,7 +4,7 @@ metadata:
   name: trade-executor
   namespace: tester
 spec:
-  type: ClusterIP
+  type: LoadBalancer
   selector:
     app: trade-executor
   ports:

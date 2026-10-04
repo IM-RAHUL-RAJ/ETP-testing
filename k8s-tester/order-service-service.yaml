@@ -4,7 +4,7 @@ metadata:
   name: order-service
   namespace: tester
 spec:
-  type: ClusterIP
+  type: LoadBalancer
   selector:
     app: order-service
   ports:

@@ -14,11 +14,9 @@ spec:
         app: frontend
         stack: trading-tester
     spec:
-      imagePullSecrets:
-        - name: artifactory-pull-secret
       containers:
         - name: frontend
-          image: trialzww0tc.jfrog.io/REPLACE_WITH_DOCKER_REPOSITORY_KEY/trading-frontend:1.0
+          image: 323187579619.dkr.ecr.ap-south-1.amazonaws.com/trading-frontend:1.0
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

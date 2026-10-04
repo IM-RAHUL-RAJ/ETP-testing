@@ -13,8 +13,6 @@ spec:
       labels:
         app: trade-executor
     spec:
-      imagePullSecrets:
-        - name: artifactory-pull-secret
       affinity:
         podAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -31,7 +29,7 @@ spec:
             - until /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --describe --topic orders >/dev/null 2>&1; do echo waiting for Kafka topics; sleep 5; done
       containers:
         - name: trade-executor
-          image: trialzww0tc.jfrog.io/REPLACE_WITH_DOCKER_REPOSITORY_KEY/trading-executor:1.0
+          image: 323187579619.dkr.ecr.ap-south-1.amazonaws.com/trading-executor:1.0
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -70,7 +68,10 @@ spec:
                   name: trading-secrets
                   key: fauxnance-api-key
             - name: FAUXNANCE_BASE_URL
-              value: http://localhost:8080
+              valueFrom:
+                configMapKeyRef:
+                  name: trading-config
+                  key: FAUXNANCE_BASE_URL
             - name: POLL_INTERVAL_SECONDS
               valueFrom:
                 configMapKeyRef:

@@ -13,11 +13,9 @@ spec:
       labels:
         app: auth-service
     spec:
-      imagePullSecrets:
-        - name: artifactory-pull-secret
       containers:
         - name: auth-service
-          image: trialzww0tc.jfrog.io/REPLACE_WITH_DOCKER_REPOSITORY_KEY/trading-auth-service:1.0
+          image: 323187579619.dkr.ecr.ap-south-1.amazonaws.com/trading-auth-service:1.0
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -60,6 +58,9 @@ spec:
                 configMapKeyRef:
                   name: trading-config
                   key: JWT_ISSUER
+            # RDS only accepts encrypted connections; node-postgres reads this.
+            - name: PGSSLMODE
+              value: no-verify
             - name: LOGIN_KEY_DIR
               value: /tmp/login-keys
             - name: COOKIE_SECURE

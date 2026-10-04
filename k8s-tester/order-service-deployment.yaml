@@ -13,8 +13,6 @@ spec:
       labels:
         app: order-service
     spec:
-      imagePullSecrets:
-        - name: artifactory-pull-secret
       initContainers:
         - name: wait-for-kafka-topics
           image: apache/kafka:3.8.0
@@ -24,7 +22,7 @@ spec:
             - until /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --describe --topic orders >/dev/null 2>&1; do echo waiting for Kafka topics; sleep 5; done
       containers:
         - name: order-service
-          image: trialzww0tc.jfrog.io/REPLACE_WITH_DOCKER_REPOSITORY_KEY/trading-trade-api:1.0
+          image: 323187579619.dkr.ecr.ap-south-1.amazonaws.com/trading-trade-api:1.0
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -67,6 +65,11 @@ spec:
                 configMapKeyRef:
                   name: trading-config
                   key: JWT_ISSUER
+            - name: CORS_ALLOWED_ORIGINS
+              valueFrom:
+                configMapKeyRef:
+                  name: trading-config
+                  key: CORS_ALLOWED_ORIGINS
           startupProbe:
             httpGet:
               path: /health
