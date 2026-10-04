@@ -64,15 +64,13 @@ spec:
               port: kafka
             periodSeconds: 5
             failureThreshold: 36
+          # A port check, not kafka-topics.sh: starting that Java tool takes
+          # longer than a probe timeout under this CPU limit, so the pod
+          # never became Ready even though the broker was serving.
           readinessProbe:
-            exec:
-              command:
-                - /opt/kafka/bin/kafka-topics.sh
-                - --bootstrap-server
-                - localhost:29092
-                - --list
+            tcpSocket:
+              port: kafka
             periodSeconds: 10
-            timeoutSeconds: 5
           livenessProbe:
             tcpSocket:
               port: kafka
