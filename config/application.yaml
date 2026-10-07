@@ -1,0 +1,58 @@
+# ==============================================================================
+# The one place for addresses and ports.
+#
+# Moving to another phase of the deployment:
+#   1. set `phase` below
+#   2. change the urls and hosts to that phase's values (table below)
+#   3. run:  python3 config/apply.py
+#
+# apply.py writes these values into the file that phase really reads:
+#   local, docker -> .env                       (docker-compose reads it)
+#   eks           -> k8s-tester/configmap.yaml  (commit it; the pipeline deploys it)
+#
+#   value                  local        docker               eks
+#   frontend/services url  localhost    http://<box-ip>      not used (see below)
+#   database host          localhost    postgres (or RDS)    the RDS endpoint
+#   kafka host : port      localhost    kafka : 29092        kafka : 29092
+#                          : 9092
+#
+# On EKS the frontend and service urls are not read: the load balancer's
+# address is found by the scripts (k8s-tester/set-urls.sh, scripts/deploy.sh).
+#
+# No passwords or keys here: this file is committed. DB_PASSWORD, JWT_SECRET and
+# FAUXNANCE_API_KEY stay in .env (Docker) and the trading-secrets Secret (EKS).
+#
+# A port here is used to build the address. It does not move the service: its
+# port is also set in its Dockerfile, application.yml and Kubernetes manifests.
+# ==============================================================================
+
+phase: eks            # local | docker | eks
+
+# What people type in the browser.
+frontend:
+  url: http://localhost
+  port: 4200
+
+services:
+  auth:
+    url: http://localhost
+    port: 3000
+  order:                  # the trade API
+    url: http://localhost
+    port: 8085
+  executor:               # nothing calls it by address; listed for reference
+    url: http://localhost
+    port: 8083
+
+database:
+  host: database-1.c94cwk4g097q.ap-south-1.rds.amazonaws.com
+  port: 5432
+  name: trading_system_db
+  user: postgres
+
+kafka:
+  host: kafka
+  port: 29092
+
+fauxnance:
+  url: https://y4t9nq2bqf.execute-api.eu-west-2.amazonaws.com/v1

@@ -101,8 +101,8 @@ services:
       - "3000:3000"
     environment:
       PORT: 3000
-      DB_HOST: postgres
-      DB_PORT: 5432
+      DB_HOST: ${DB_HOST:-postgres}
+      DB_PORT: ${DB_PORT:-5432}
       DB_NAME: ${DB_NAME:-trading_system_db}
       DB_USER: ${DB_USER:-postgres}
       DB_PASSWORD: ${DB_PASSWORD:-postgres}
@@ -139,12 +139,12 @@ services:
     ports:
       - "8085:8085"
     environment:
-      DB_HOST: postgres
-      DB_PORT: 5432
+      DB_HOST: ${DB_HOST:-postgres}
+      DB_PORT: ${DB_PORT:-5432}
       DB_NAME: ${DB_NAME:-trading_system_db}
       DB_USER: ${DB_USER:-postgres}
       DB_PASSWORD: ${DB_PASSWORD:-postgres}
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:29092}
       JWT_SECRET: ${JWT_SECRET:-akatsuki_akatsuki_akatsuki_akatsuki_akatsuki}
       JWT_ISSUER: ${JWT_ISSUER:-auth-service}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://127.0.0.1:4200,http://localhost:4200,http://frontend:4200}
@@ -166,12 +166,12 @@ services:
     ports:
       - "8083:8083"
     environment:
-      DB_HOST: postgres
-      DB_PORT: 5432
+      DB_HOST: ${DB_HOST:-postgres}
+      DB_PORT: ${DB_PORT:-5432}
       DB_NAME: ${DB_NAME:-trading_system_db}
       DB_USER: ${DB_USER:-postgres}
       DB_PASSWORD: ${DB_PASSWORD:-postgres}
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:29092}
       FAUXNANCE_API_KEY: ${FAUXNANCE_API_KEY:-mock_api_key}
       FAUXNANCE_BASE_URL: ${FAUXNANCE_BASE_URL:-http://localhost:8080}
       POLL_INTERVAL_SECONDS: ${POLL_INTERVAL_SECONDS:-60}
