@@ -1,0 +1,88 @@
+# Spring Boot order and executor services, a NestJS auth service, an Angular page.
+# Verified: all four images build and the stack starts; the SQL loads; the page's
+# container forwards /auth and /api/v1 to the services. Mail goes straight to SMTP.
+
+name: example
+
+# The frontend container passes /auth and /api on to the services, so the
+# browser only talks to the page's own address.
+proxy: true
+
+folders:
+  frontend:
+    path: Frontend/trading-ui
+    type: angular
+    health: /
+  auth:
+    path: Services/auth-service
+    type: node
+    health: /
+  order:
+    path: Services/order-service
+    type: java
+    health: /actuator/health
+  executor:
+    path: Services/executor-service
+    type: java
+    health: /actuator/health
+
+sql:
+  - Databases/PostgreSQL/migrations
+  - Databases/PostgreSQL/seed
+
+# Mail goes straight to a real SMTP server (Gmail by default).
+# Type SPRING_MAIL_USERNAME and SPRING_MAIL_PASSWORD (a Gmail app password) in deploy/.env.
+mail:
+  host: smtp.gmail.com
+  port: 587
+
+settings:
+  POSTGRES_HOST: "{db_host}"
+  POSTGRES_PORT: "{db_port}"
+  POSTGRES_DB: "{db_name}"
+  POSTGRES_USER: "{db_user}"
+  POSTGRES_SCHEMA: trade
+  POSTGRES_SEARCH_PATH: auth
+  SPRING_DATASOURCE_URL: "jdbc:postgresql://{db_host}:{db_port}/{db_name}?currentSchema=trade"
+  SPRING_DATASOURCE_USERNAME: "{db_user}"
+  PGSSLMODE: "{db_sslmode}"
+  KAFKA_BOOTSTRAP_SERVERS: "{kafka}"
+  JWT_ISSUER: auth-service
+  APP_CORS_ALLOWED_ORIGINS: "{cors_origins}"
+  APP_FRONTEND_URL: "{frontend_url}"
+  AUTH_SERVICE_URL: "{auth_internal}"
+  TRADE_API_BASE_URL: "{order_internal}"
+  SPRING_MAIL_HOST: "{mail_host}"
+  SPRING_MAIL_PORT: "{mail_port}"
+  SPRING_MAIL_AUTH: "true"
+  SPRING_MAIL_STARTTLS: "true"
+  SPRING_MAIL_STARTTLS_REQUIRED: "true"
+  FAUXNANCE_BASE_URL: https://y4t9nq2bqf.execute-api.eu-west-2.amazonaws.com/v1
+  CURRENCYAPI_BASE_URL: https://api.currencyapi.com
+  POLL_INTERVAL_SECONDS: "60"
+
+secrets:
+  - POSTGRES_PASSWORD
+  - JWT_SECRET
+  - FAUXNANCE_API_KEY
+  - CURRENCYAPI_API_KEY
+  - SPRING_MAIL_USERNAME
+  - SPRING_MAIL_PASSWORD
+
+derived_secrets:
+  APP_MAIL_FROM: "{SPRING_MAIL_USERNAME}"
+
+database_password: POSTGRES_PASSWORD
+
+# routes: the paths the frontend container (and the EKS load balancer) send to each service.
+# The rest is for Kubernetes and Jenkins only.
+kubernetes:
+  registry: 123456789012.dkr.ecr.ap-south-1.amazonaws.com
+  routes:
+    auth: [/auth]
+    order: [/api/v1]
+  skip_tests: [order]     # one unit test fails on main (PriceAlertEvaluatorTest)
+  smoke:
+    - {path: /, expect: 200}
+    - {path: /auth/me, expect: 401}
+    - {path: /api/v1/accounts/1, expect: 401}

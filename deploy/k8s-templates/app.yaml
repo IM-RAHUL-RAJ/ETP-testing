@@ -1,0 +1,76 @@
+# A Deployment keeps one copy of the application running.
+# A Service gives it a fixed name and port inside the cluster.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: @@NAME@@
+  namespace: @@NS@@
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: @@NAME@@
+  template:
+    metadata:
+      labels:
+        app: @@NAME@@
+    spec:
+      enableServiceLinks: false
+@@INIT@@      containers:
+        - name: @@NAME@@
+          image: @@IMAGE@@
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: @@LISTEN@@
+          envFrom:
+            - configMapRef:
+                name: app-config
+            - secretRef:
+                name: app-secrets
+            - configMapRef:          # this service's own settings win over the shared ones
+                name: @@NAME@@-config
+          env:
+            - name: PORT
+              value: "@@LISTEN@@"
+            - name: SERVER_PORT
+              value: "@@LISTEN@@"
+          startupProbe:
+            httpGet:
+              path: @@HEALTH@@
+              port: http
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: @@HEALTH@@
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: @@HEALTH@@
+              port: http
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: @@CPU@@
+              memory: @@MEMORY@@
+            limits:
+              cpu: @@CPU_LIMIT@@
+              memory: @@MEMORY_LIMIT@@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: @@NAME@@
+  namespace: @@NS@@
+  annotations:
+    alb.ingress.kubernetes.io/healthcheck-path: @@HEALTH@@
+spec:
+  type: ClusterIP
+  selector:
+    app: @@NAME@@
+  ports:
+    - name: http
+      port: @@PORT@@
+      targetPort: http

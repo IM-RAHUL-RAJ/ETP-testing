@@ -1,0 +1,133 @@
+// Test, build, push to ECR, deploy to EKS, check. Runs on every push to main.
+// In the Jenkins job, set Script Path to deploy/Jenkinsfile.
+// Names, folders and the registry come from deploy/build.env.
+pipeline {
+  agent any
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+    timeout(time: 45, unit: 'MINUTES')
+    buildDiscarder(logRotator(numToKeepStr: '15'))
+  }
+
+  triggers {
+    githubPush()
+  }
+
+  stages {
+    // Each service is tested in a throwaway Maven or Node container.
+    stage('Test') {
+      steps {
+        sh '''#!/bin/bash
+          set -euo pipefail
+          set -a; . deploy/build.env; set +a
+          mkdir -p "$HOME/.m2"
+          for role in FRONTEND AUTH ORDER EXECUTOR; do
+            test="${role}_TEST"; path="${role}_PATH"; type="${role}_TYPE"; version="${role}_VERSION"
+            [ "${!test}" = true ] || continue
+            echo "==> tests: ${!path}"
+            case "${!type}" in
+              java)
+                docker run --rm -u "$(id -u):$(id -g)" \
+                  -v "$WORKSPACE/${!path}":/app -w /app \
+                  -v "$HOME/.m2":/var/maven/.m2 -e MAVEN_CONFIG=/var/maven/.m2 \
+                  "maven:3.9.9-eclipse-temurin-${!version}" mvn -B -q -Duser.home=/var/maven test
+                ;;
+              node|angular)
+                docker run --rm -e HOME=/tmp -e npm_config_cache=/tmp/.npm \
+                  -v "$WORKSPACE/${!path}":/src:ro "node:${!version}-alpine" sh -c \
+                  "cp -r /src /tmp/app && cd /tmp/app && rm -rf node_modules && (npm ci --no-audit --no-fund || npm install --no-audit --no-fund) && npm test"
+                ;;
+              *) echo "no test command for type ${!type}; skipped" ;;
+            esac
+          done
+        '''
+      }
+    }
+
+    // Images are tagged with the commit they were built from.
+    stage('Build and push images') {
+      steps {
+        sh '''#!/bin/bash
+          set -euo pipefail
+          set -a; . deploy/build.env; set +a
+          TAG="$(git rev-parse --short=12 HEAD)"
+          aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$REGISTRY"
+          for pair in FRONTEND:frontend AUTH:auth-service ORDER:order-service EXECUTOR:executor-service; do
+            role="${pair%%:*}"; name="${pair##*:}"
+            path="${role}_PATH"; type="${role}_TYPE"; version="${role}_VERSION"; listen="${role}_LISTEN"; health="${role}_HEALTH"
+            context="${role}_CONTEXT"; module="${role}_MODULE"; prebuild="${role}_PREBUILD"; start="${role}_START"; mainclass="${role}_MAIN_CLASS"
+            image="$REGISTRY/$IMAGE_PREFIX-$name:$TAG"
+            echo "==> $image"
+            docker build \
+              -f "deploy/docker/${!type}.Dockerfile" \
+              --build-arg RUNTIME_VERSION="${!version}" \
+              --build-arg APP_PORT="${!listen}" \
+              --build-arg HEALTH_PATH="${!health}" \
+              --build-arg MODULE="${!module}" \
+              --build-arg PREBUILD="${!prebuild}" \
+              --build-arg START_CMD="${!start}" --build-arg APP_ENTRY="${!start}" --build-arg MAIN_CLASS="${!mainclass}" \
+              -t "$image" "$WORKSPACE/${!context}"
+            docker push "$image"
+            docker rmi "$image" >/dev/null
+          done
+        '''
+      }
+    }
+
+    // Applies deploy/k8s with the four images set to this build's tag.
+    stage('Deploy to EKS') {
+      steps {
+        sh '''#!/bin/bash
+          set -euo pipefail
+          set -a; . deploy/build.env; set +a
+          TAG="$(git rev-parse --short=12 HEAD)"
+          NAMES="frontend auth-service order-service executor-service"
+          rm -rf deploy/build && mkdir deploy/build
+          {
+            echo "resources:"
+            echo "  - ../k8s"
+            echo "images:"
+            for name in $NAMES; do
+              echo "  - name: $REGISTRY/$IMAGE_PREFIX-$name"
+              echo "    newTag: \\"$TAG\\""
+            done
+          } > deploy/build/kustomization.yaml
+          kubectl apply -k deploy/build
+          for name in $NAMES; do
+            kubectl -n "$NS" rollout status "deployment/$name" --timeout=10m
+          done
+        '''
+      }
+    }
+
+    // Calls the load balancer: each path must return the status listed
+    // under kubernetes.smoke in config/project.yaml.
+    stage('Smoke test') {
+      steps {
+        sh '''#!/bin/bash
+          set -euo pipefail
+          set -a; . deploy/build.env; set +a
+          HOST="$(kubectl -n "$NS" get ingress app -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
+          for entry in ${SMOKE:-/=200}; do
+            path="${entry%%=*}"; want="${entry##*=}"; code=""
+            for _ in $(seq 1 30); do
+              code="$(curl -s -o /dev/null -m 10 -w '%{http_code}' "http://$HOST$path" || true)"
+              [ "$code" = "$want" ] && break
+              sleep 10
+            done
+            echo "$path -> $code (wanted $want)"
+            [ "$code" = "$want" ]
+          done
+        '''
+      }
+    }
+  }
+
+  post {
+    success { echo 'Deployed and checked.' }
+    failure { echo 'Failed. The cluster keeps running the last version that rolled out.' }
+    always  { sh 'docker image prune -f >/dev/null || true; docker builder prune -f --keep-storage 4GB >/dev/null || true' }
+  }
+}

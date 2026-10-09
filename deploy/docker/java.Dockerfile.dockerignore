@@ -1,0 +1,6 @@
+# Used by docker build for java.Dockerfile (BuildKit reads <Dockerfile>.dockerignore).
+**/target
+**/node_modules
+**/.git
+**/.idea
+**/*.log
