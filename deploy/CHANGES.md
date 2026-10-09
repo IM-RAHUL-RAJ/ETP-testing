@@ -1,6 +1,6 @@
 # What this `deploy/` adds to CD2026-files/deploy
 
-`deploy/` is `CD2026-files/deploy` with fourteen changes, found while fitting
+`deploy/` is `CD2026-files/deploy` with sixteen changes, found while fitting
 thirty capstone repositories (six classes, five teams each) to it. A project that uses none of the new options
 gets the same result as before, except the frontend reverse proxy, which is off
 unless `proxy: true` is set.
@@ -147,6 +147,22 @@ Seen in: a plain-Java executor-service.
 Files named like Flyway migrations (`V4__instrument_prices.sql`) were written
 for Flyway, which runs each in a transaction; `LOCK TABLE` outside one fails.
 The loader now runs those files with `--single-transaction`.
+
+## 15. Kafka on any port (`kafka.port`; `docker-compose.yml`, `apply.py`, `k8s-templates/kafka.yaml`)
+
+Before: the broker's in-network listener was fixed at 29092 and the host listener at 9092,
+so `kafka.port: 9092` made every service dial `kafka:9092`, which advertises `localhost`.
+
+After: `apply.py` writes `KAFKA_PORT` (the port on the network, from `kafka.port`) and
+`KAFKA_HOST_PORT` (9092, or 19092 when `kafka.port` is 9092 so the two do not clash).
+Compose and the Kubernetes Kafka file use them. With the default 29092 nothing changes.
+Checked with `kafka.port: 9092`: topics created, both Java services connect.
+
+## 16. Java services keep off port 8080 (`java.Dockerfile`)
+
+Jenkins listens on 8080 on the build box. The Java image's default `APP_PORT` is now
+8081 (compose always passes the configured port, so this only matters when none is given).
+Configs that put the trade API on 8080 now use 8081 for it and 8082 for the executor.
 
 ## Not changed
 

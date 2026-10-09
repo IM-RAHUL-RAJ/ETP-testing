@@ -220,6 +220,9 @@ def build_settings(cfg):
         "AWS_REGION": aws["region"],
         "REGISTRY": aws["registry"],
         "NS": aws["namespace"],
+        # The port services use on the compose network; the published one moves aside if it is 9092.
+        "KAFKA_PORT": str(cfg["kafka"]["port"]),
+        "KAFKA_HOST_PORT": "19092" if str(cfg["kafka"]["port"]) == "9092" else "9092",
         "DB_NAME": db["name"],
         "DB_USER": db["user"],
         "DB_PASSWORD_ENV": db["password_env"],
@@ -348,7 +351,7 @@ def k8s_files(cfg):
     aws, svc, mail = cfg["aws"], cfg["services"], cfg["mail"]
     templates = DEPLOY / "k8s-templates"
     kafka = f"{cfg['kafka']['host']}:{cfg['kafka']['port']}"
-    common = {"NS": aws["namespace"], "KAFKA": kafka}
+    common = {"NS": aws["namespace"], "KAFKA": kafka, "KAFKA_PORT": str(cfg["kafka"]["port"])}
     files = {}
     for name in ("namespace.yaml", "storageclass.yaml", "kafka.yaml"):
         files[name] = render((templates / name).read_text(), common)

@@ -12,7 +12,7 @@ spec:
     app: kafka
   ports:
     - name: kafka
-      port: 29092
+      port: @@KAFKA_PORT@@
       targetPort: kafka
     - name: controller
       port: 9093
@@ -46,7 +46,7 @@ spec:
           imagePullPolicy: IfNotPresent
           ports:
             - name: kafka
-              containerPort: 29092
+              containerPort: @@KAFKA_PORT@@
             - name: controller
               containerPort: 9093
           env:
@@ -55,9 +55,9 @@ spec:
             - name: KAFKA_PROCESS_ROLES
               value: broker,controller
             - name: KAFKA_LISTENERS
-              value: INTERNAL://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093
+              value: INTERNAL://0.0.0.0:@@KAFKA_PORT@@,CONTROLLER://0.0.0.0:9093
             - name: KAFKA_ADVERTISED_LISTENERS
-              value: INTERNAL://kafka:29092
+              value: INTERNAL://kafka:@@KAFKA_PORT@@
             - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
               value: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT
             - name: KAFKA_CONTROLLER_QUORUM_VOTERS
@@ -136,7 +136,7 @@ spec:
             - -c
             - |
               set -eu
-              BS=kafka:29092
+              BS=kafka:@@KAFKA_PORT@@
               until /opt/kafka/bin/kafka-topics.sh --bootstrap-server "$BS" --list >/dev/null 2>&1; do
                 echo "waiting for Kafka"
                 sleep 5
