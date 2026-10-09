@@ -1,0 +1,153 @@
+# Kafka: a Service (its name), a StatefulSet (one broker with its own disk)
+# and a Job that creates the six topics once.
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: @@NS@@
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app: kafka
+  ports:
+    - name: kafka
+      port: 29092
+      targetPort: kafka
+    - name: controller
+      port: 9093
+      targetPort: controller
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  namespace: @@NS@@
+spec:
+  serviceName: kafka
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+    spec:
+      # Stops Kubernetes adding a KAFKA_PORT variable, which the image would read as a setting.
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      # Kafka runs as user 1000; a new disk belongs to root. This makes it writable.
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: kafka
+          image: apache/kafka:3.8.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: kafka
+              containerPort: 29092
+            - name: controller
+              containerPort: 9093
+          env:
+            - name: KAFKA_NODE_ID
+              value: "1"
+            - name: KAFKA_PROCESS_ROLES
+              value: broker,controller
+            - name: KAFKA_LISTENERS
+              value: INTERNAL://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: INTERNAL://kafka:29092
+            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+              value: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT
+            - name: KAFKA_CONTROLLER_QUORUM_VOTERS
+              value: 1@kafka-0.kafka:9093
+            - name: KAFKA_CONTROLLER_LISTENER_NAMES
+              value: CONTROLLER
+            - name: KAFKA_INTER_BROKER_LISTENER_NAME
+              value: INTERNAL
+            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+              value: "1"
+            - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
+              value: "false"
+            # A subfolder: a new disk has a lost+found folder that Kafka refuses to start with.
+            - name: KAFKA_LOG_DIRS
+              value: /var/lib/kafka/data/kraft
+            - name: KAFKA_HEAP_OPTS
+              value: -Xms128m -Xmx256m
+          startupProbe:
+            tcpSocket:
+              port: kafka
+            periodSeconds: 5
+            failureThreshold: 36
+          readinessProbe:
+            tcpSocket:
+              port: kafka
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: kafka
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/kafka/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: gp3
+        resources:
+          requests:
+            storage: 2Gi
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-topics
+  namespace: @@NS@@
+spec:
+  backoffLimit: 10
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        app: kafka-topics
+    spec:
+      enableServiceLinks: false
+      restartPolicy: OnFailure
+      containers:
+        - name: create-topics
+          image: apache/kafka:3.8.0
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              BS=kafka:29092
+              until /opt/kafka/bin/kafka-topics.sh --bootstrap-server "$BS" --list >/dev/null 2>&1; do
+                echo "waiting for Kafka"
+                sleep 5
+              done
+              create() {
+                /opt/kafka/bin/kafka-topics.sh --bootstrap-server "$BS" --create --if-not-exists \
+                  --topic "$1" --partitions "$2" --replication-factor 1 --config retention.ms="$3"
+              }
+              create orders 3 604800000
+              create trade-events 3 2592000000
+              create market-data 6 86400000
+              create orders.DLT 3 604800000
+              create trade-events.DLT 3 2592000000
+              create market-data.DLT 6 86400000

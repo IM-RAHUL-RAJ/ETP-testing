@@ -1,0 +1,221 @@
+# Postgres, Kafka, Mailpit and the four applications on one machine.
+# Every ${VALUE} comes from .env, which config/apply.py writes.
+name: ${PROJECT_NAME}
+
+x-app: &app
+  env_file: .env
+  networks: [app]
+  restart: unless-stopped
+
+services:
+  # Started only while database.host is `postgres`. With an RDS endpoint
+  # there, this container is left out.
+  postgres:
+    image: postgres:16-alpine
+    profiles: [localdb]
+    env_file: .env
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      SQL_PATHS: ${DB_SQL}
+      SQL_VARS: ${DB_SQL_VARS}
+    entrypoint:
+      - sh
+      - -c
+      - |
+        export POSTGRES_PASSWORD="$$(printenv "$$DB_PASSWORD_ENV")"
+        unset PGSSLMODE PGHOST PGPORT
+        exec docker-entrypoint.sh postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ${PROJECT_DIR}:/project:ro
+      - ./docker/postgres-init.sh:/docker-entrypoint-initdb.d/00-load.sh:ro
+    networks: [app]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  kafka:
+    image: apache/kafka:3.8.0
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093,PLAINTEXT_HOST://0.0.0.0:9092"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    networks: [app]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 15s
+  kafka-init:
+    image: apache/kafka:3.8.0
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks: [app]
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        create() {
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --create --if-not-exists \
+            --topic "$$1" --partitions "$$2" --replication-factor 1 --config retention.ms="$$3"
+        }
+        create orders 3 604800000
+        create trade-events 3 2592000000
+        create market-data 6 86400000
+        create orders.DLT 3 604800000
+        create trade-events.DLT 3 2592000000
+        create market-data.DLT 6 86400000
+        echo "=== topics ready ==="
+  # Started only when project.yaml has mailpit: true.
+  mailpit:
+    image: axllent/mailpit:latest
+    profiles: [mail]
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+    networks: [app]
+    restart: unless-stopped
+
+  auth-service:
+    <<: *app
+    env_file: [.env, auth-service.env]
+    build:
+      context: ${PROJECT_DIR}/${AUTH_CONTEXT}
+      dockerfile: ${DEPLOY_DIR}/docker/${AUTH_TYPE}.Dockerfile
+      args:
+        RUNTIME_VERSION: ${AUTH_VERSION}
+        MODULE: ${AUTH_MODULE}
+        PREBUILD: ${AUTH_PREBUILD}
+        START_CMD: ${AUTH_START}
+        MAIN_CLASS: ${AUTH_MAIN_CLASS}
+        APP_ENTRY: ${AUTH_START}
+        APP_PORT: ${AUTH_PORT}
+        HEALTH_PATH: ${AUTH_HEALTH}
+    image: ${IMAGE_PREFIX}-auth-service
+    environment:
+      PORT: ${AUTH_PORT}
+      SERVER_PORT: ${AUTH_PORT}
+    ports:
+      - "${AUTH_PORT}:${AUTH_PORT}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+
+  order-service:
+    <<: *app
+    env_file: [.env, order-service.env]
+    build:
+      context: ${PROJECT_DIR}/${ORDER_CONTEXT}
+      dockerfile: ${DEPLOY_DIR}/docker/${ORDER_TYPE}.Dockerfile
+      args:
+        RUNTIME_VERSION: ${ORDER_VERSION}
+        MODULE: ${ORDER_MODULE}
+        PREBUILD: ${ORDER_PREBUILD}
+        START_CMD: ${ORDER_START}
+        MAIN_CLASS: ${ORDER_MAIN_CLASS}
+        APP_ENTRY: ${ORDER_START}
+        APP_PORT: ${ORDER_PORT}
+        HEALTH_PATH: ${ORDER_HEALTH}
+    image: ${IMAGE_PREFIX}-order-service
+    environment:
+      PORT: ${ORDER_PORT}
+      SERVER_PORT: ${ORDER_PORT}
+    ports:
+      - "${ORDER_PORT}:${ORDER_PORT}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+      kafka-init:
+        condition: service_completed_successfully
+      auth-service:
+        condition: service_healthy
+
+  executor-service:
+    <<: *app
+    env_file: [.env, executor-service.env]
+    build:
+      context: ${PROJECT_DIR}/${EXECUTOR_CONTEXT}
+      dockerfile: ${DEPLOY_DIR}/docker/${EXECUTOR_TYPE}.Dockerfile
+      args:
+        RUNTIME_VERSION: ${EXECUTOR_VERSION}
+        MODULE: ${EXECUTOR_MODULE}
+        PREBUILD: ${EXECUTOR_PREBUILD}
+        START_CMD: ${EXECUTOR_START}
+        MAIN_CLASS: ${EXECUTOR_MAIN_CLASS}
+        APP_ENTRY: ${EXECUTOR_START}
+        APP_PORT: ${EXECUTOR_PORT}
+        HEALTH_PATH: ${EXECUTOR_HEALTH}
+    image: ${IMAGE_PREFIX}-executor-service
+    environment:
+      PORT: ${EXECUTOR_PORT}
+      SERVER_PORT: ${EXECUTOR_PORT}
+    ports:
+      - "${EXECUTOR_PORT}:${EXECUTOR_PORT}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+      kafka-init:
+        condition: service_completed_successfully
+
+  frontend:
+    <<: *app
+    env_file: [.env, frontend.env]
+    build:
+      context: ${PROJECT_DIR}/${FRONTEND_CONTEXT}
+      dockerfile: ${DEPLOY_DIR}/docker/${FRONTEND_TYPE}.Dockerfile
+      args:
+        RUNTIME_VERSION: ${FRONTEND_VERSION}
+        MODULE: ${FRONTEND_MODULE}
+        PREBUILD: ${FRONTEND_PREBUILD}
+        START_CMD: ${FRONTEND_START}
+        MAIN_CLASS: ${FRONTEND_MAIN_CLASS}
+        APP_ENTRY: ${FRONTEND_START}
+        APP_PORT: ${FRONTEND_LISTEN}
+        HEALTH_PATH: ${FRONTEND_HEALTH}
+    image: ${IMAGE_PREFIX}-frontend
+    environment:
+      PORT: ${FRONTEND_LISTEN}
+      AUTH_URL: ${AUTH_URL}
+      BACKEND_URL: ${BACKEND_URL}
+    ports:
+      - "${FRONTEND_PORT}:${FRONTEND_LISTEN}"
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+
+networks:
+  app:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  kafka_data:
