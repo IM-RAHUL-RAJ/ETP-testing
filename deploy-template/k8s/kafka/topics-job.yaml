@@ -1,0 +1,27 @@
+# Creates the topics once Kafka is ready, then stops.
+# CHANGE ME: the topics your services use (the same list as KAFKA_TOPICS in .env).
+#   envsubst '$PROJECT $ECR_REGISTRY $IMAGE_TAG' < deploy/k8s/kafka/topics-job.yaml | kubectl apply -f -
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-topics
+  namespace: ${PROJECT}
+spec:
+  backoffLimit: 10
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: topics
+          image: apache/kafka:3.8.0
+          env:
+            - { name: KAFKA_TOPICS, value: "orders:3 trade-events:3 market-data:3" }
+          command:
+            - sh
+            - -ec
+            - |
+              until /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list >/dev/null 2>&1; do echo waiting for Kafka; sleep 5; done
+              for t in $KAFKA_TOPICS; do
+                /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
+                  --topic "${t%%:*}" --partitions "${t##*:}" --replication-factor 1
+              done

@@ -1,0 +1,15 @@
+# Phase 2: no load balancer of its own; the Ingress (ingress/ingress.yaml) reaches it.
+#   envsubst '$PROJECT $ECR_REGISTRY $IMAGE_TAG' < deploy/k8s/auth-service/service-internal.yaml | kubectl apply -f -
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-service
+  namespace: ${PROJECT}
+  annotations:
+    alb.ingress.kubernetes.io/healthcheck-path: "/"
+    alb.ingress.kubernetes.io/success-codes: "200-499"
+spec:
+  type: ClusterIP
+  selector: { app: auth-service }
+  ports:
+    - { name: http, port: 3000, targetPort: 3000 }

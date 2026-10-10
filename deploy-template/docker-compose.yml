@@ -1,0 +1,138 @@
+# The whole platform on one machine: Postgres, Kafka and the four services.
+#   cd deploy
+#   cp .env.example .env                        (fill it in)
+#   cp env/secrets.env.example env/secrets.env  (fill it in)
+#   docker compose up -d --build
+# The page is on port 4200; it forwards /auth and /api to the services.
+# 3000, 8081 and 8082 are published for testing; 8080 is left to Jenkins.
+#
+# You should not need to change this file: folders, ports and settings come from .env
+# and env/*.env. Read it once to see how the pieces fit.
+name: ${PROJECT}
+
+x-service: &service
+  restart: unless-stopped
+  env_file: [env/common.env, env/secrets.env]
+
+services:
+  # Local database, loaded with your SQL on its first start. With RDS, set
+  # COMPOSE_PROFILES= (empty) in .env so this container does not start.
+  # SSL is on (like RDS), so a service that requires SSL in production connects too.
+  postgres:
+    profiles: [localdb]
+    image: postgres:17
+    command: >-
+      postgres -c ssl=on
+      -c ssl_cert_file=/etc/ssl/certs/ssl-cert-snakeoil.pem
+      -c ssl_key_file=/etc/ssl/private/ssl-cert-snakeoil.key
+    env_file: [env/secrets.env]
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      SQL_FILES: ${SQL_FILES}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ${SQL_DIR}:/sql:ro,z
+      - ./docker/load-sql.sh:/docker-entrypoint-initdb.d/load-sql.sh:ro,z
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  kafka:
+    image: apache/kafka:3.8.0
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      CLUSTER_ID: 4L6g3nShT-eMCtK--X86sw
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server 127.0.0.1:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 15s
+    restart: unless-stopped
+
+  # Creates the topics listed in KAFKA_TOPICS (.env) once Kafka is up, then exits.
+  kafka-init:
+    image: apache/kafka:3.8.0
+    depends_on:
+      kafka: { condition: service_healthy }
+    environment:
+      KAFKA_TOPICS: ${KAFKA_TOPICS}
+    entrypoint: ["sh", "-ec"]
+    command:
+      - |
+        for t in $$KAFKA_TOPICS; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
+            --topic "$${t%%:*}" --partitions "$${t##*:}" --replication-factor 1
+        done
+        echo "topics ready"
+    restart: "no"
+
+  auth-service:
+    <<: *service
+    build:
+      context: ..
+      dockerfile: deploy/docker/node.Dockerfile
+      args: { APP_DIR: "${AUTH_DIR}", ENTRY: "${AUTH_ENTRY}", PORT: "3000" }
+    image: ${PROJECT}/auth-service:${IMAGE_TAG:-latest}
+    env_file: [env/common.env, env/auth-service.env, env/secrets.env]
+    ports: ["3000:3000"]
+    depends_on:
+      postgres: { condition: service_healthy, required: false }
+
+  order-service:
+    <<: *service
+    build:
+      context: ..
+      dockerfile: deploy/docker/java.Dockerfile
+      args: { APP_DIR: "${ORDER_DIR}", PORT: "8081" }
+    image: ${PROJECT}/order-service:${IMAGE_TAG:-latest}
+    env_file: [env/common.env, env/order-service.env, env/secrets.env]
+    ports: ["8081:8081"]
+    depends_on:
+      postgres: { condition: service_healthy, required: false }
+      kafka-init: { condition: service_completed_successfully }
+
+  executor-service:
+    <<: *service
+    build:
+      context: ..
+      dockerfile: deploy/docker/java.Dockerfile
+      args: { APP_DIR: "${EXECUTOR_DIR}", PORT: "8082" }
+    image: ${PROJECT}/executor-service:${IMAGE_TAG:-latest}
+    env_file: [env/common.env, env/executor-service.env, env/secrets.env]
+    ports: ["8082:8082"]
+    depends_on:
+      postgres: { condition: service_healthy, required: false }
+      kafka-init: { condition: service_completed_successfully }
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: deploy/docker/frontend.Dockerfile
+      args: { APP_DIR: "${FRONTEND_DIR}" }
+    image: ${PROJECT}/frontend:${IMAGE_TAG:-latest}
+    ports: ["4200:80"]
+    depends_on: [auth-service, order-service]
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  kafka_data:

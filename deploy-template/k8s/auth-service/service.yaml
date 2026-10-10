@@ -1,0 +1,13 @@
+# Phase 1: auth-service gets its own public load balancer (an AWS Network/Classic LB).
+#   envsubst '$PROJECT $ECR_REGISTRY $IMAGE_TAG' < deploy/k8s/auth-service/service.yaml | kubectl apply -f -
+# Phase 2 (one load balancer for everything): apply service-internal.yaml instead (README step 10).
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-service
+  namespace: ${PROJECT}
+spec:
+  type: LoadBalancer
+  selector: { app: auth-service }
+  ports:
+    - { name: http, port: 3000, targetPort: 3000 }

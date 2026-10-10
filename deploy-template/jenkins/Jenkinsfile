@@ -1,0 +1,92 @@
+// Every push to main: build the four images, push them to ECR, deploy them to EKS and
+// check the page. Runs on the Jenkins machine (the EC2 box), which has Docker, kubectl and
+// an AWS role that can push to ECR and reach the cluster: no AWS keys are stored in Jenkins.
+//
+// Before the first run (README step 11): the cluster exists, deploy/.env is committed, and the
+// Secret app-secrets has been created by hand from deploy/env/secrets.env (README step 9).
+// Jenkins never sees your secrets.
+//
+// CHANGE ME: AWS_REGION, if you are not in ap-south-1. Everything else comes from deploy/.env.
+pipeline {
+  agent any
+  options { timestamps(); disableConcurrentBuilds() }
+  environment { AWS_REGION = 'ap-south-1' }
+
+  stages {
+    stage('Build images') {
+      steps {
+        sh '''#!/bin/bash
+          set -euo pipefail
+          set -a; . deploy/.env; set +a
+          ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+          REG=$ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com
+          TAG=$(git rev-parse --short=12 HEAD)
+          docker build -f deploy/docker/frontend.Dockerfile --build-arg APP_DIR="$FRONTEND_DIR" -t "$REG/$PROJECT/frontend:$TAG" .
+          docker build -f deploy/docker/node.Dockerfile --build-arg APP_DIR="$AUTH_DIR" --build-arg ENTRY="$AUTH_ENTRY" --build-arg PORT=3000 -t "$REG/$PROJECT/auth-service:$TAG" .
+          docker build -f deploy/docker/java.Dockerfile --build-arg APP_DIR="$ORDER_DIR" --build-arg PORT=8081 -t "$REG/$PROJECT/order-service:$TAG" .
+          docker build -f deploy/docker/java.Dockerfile --build-arg APP_DIR="$EXECUTOR_DIR" --build-arg PORT=8082 -t "$REG/$PROJECT/executor-service:$TAG" .
+        '''
+      }
+    }
+
+    stage('Push to ECR') {
+      steps {
+        sh '''#!/bin/bash
+          set -euo pipefail
+          set -a; . deploy/.env; set +a
+          ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+          REG=$ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com
+          TAG=$(git rev-parse --short=12 HEAD)
+          aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$REG"
+          for s in frontend auth-service order-service executor-service; do
+            aws ecr describe-repositories --repository-names "$PROJECT/$s" >/dev/null 2>&1 \
+              || aws ecr create-repository --repository-name "$PROJECT/$s" >/dev/null
+            docker push "$REG/$PROJECT/$s:$TAG"
+          done
+        '''
+      }
+    }
+
+    stage('Deploy to EKS') {
+      steps {
+        sh '''#!/bin/bash
+          set -euo pipefail
+          set -a; . deploy/.env; set +a
+          export ECR_REGISTRY=$(aws sts get-caller-identity --query Account --output text).dkr.ecr.$AWS_REGION.amazonaws.com
+          export IMAGE_TAG=$(git rev-parse --short=12 HEAD)
+          k() { envsubst '$PROJECT $ECR_REGISTRY $IMAGE_TAG' < "$1" | kubectl apply -f -; }
+          kubectl get secret app-secrets -n "$PROJECT" >/dev/null 2>&1 || {
+            echo "The Secret app-secrets is missing in namespace $PROJECT. Create it from deploy/env/secrets.env (README step 9)." >&2; exit 1; }
+          # Settings: the same env files docker compose uses.
+          for c in common auth-service order-service executor-service; do
+            kubectl -n "$PROJECT" create configmap "$c-config" --from-env-file="deploy/env/$c.env" --dry-run=client -o yaml | kubectl apply -f -
+          done
+          for s in auth-service order-service executor-service frontend; do k "deploy/k8s/$s/deployment.yaml"; done
+          # Settings are read at start: restart so a changed env file takes effect.
+          for s in auth-service order-service executor-service frontend; do
+            kubectl -n "$PROJECT" rollout restart "deployment/$s"
+          done
+          for s in auth-service order-service executor-service frontend; do
+            kubectl -n "$PROJECT" rollout status "deployment/$s" --timeout=10m
+          done
+        '''
+      }
+    }
+
+    stage('Smoke test') {
+      steps {
+        sh '''#!/bin/bash
+          set -euo pipefail
+          set -a; . deploy/.env; set +a
+          # Phase 2 (Ingress) if there is one, else the frontend's own load balancer.
+          HOST=$(kubectl -n "$PROJECT" get ingress app -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
+          [ -n "$HOST" ] || HOST=$(kubectl -n "$PROJECT" get svc frontend -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          for i in $(seq 30); do curl -sf -o /dev/null "http://$HOST/" && break; sleep 10; done
+          echo "page:     $(curl -s -o /dev/null -w '%{http_code}' "http://$HOST/")   (expect 200)"
+          echo "auth API: $(curl -s -o /dev/null -w '%{http_code}' "http://$HOST/auth/me")   (expect 401)"
+          test "$(curl -s -o /dev/null -w '%{http_code}' "http://$HOST/")" = 200
+        '''
+      }
+    }
+  }
+}

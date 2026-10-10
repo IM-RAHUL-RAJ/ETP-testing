@@ -1,0 +1,44 @@
+# order-service: one copy of the container, with its settings and secrets.
+# Applied with the image address filled in (README step 9):
+#   envsubst '$PROJECT $ECR_REGISTRY $IMAGE_TAG' < deploy/k8s/order-service/deployment.yaml | kubectl apply -f -
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+  namespace: ${PROJECT}
+  labels: { app: order-service }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: order-service }
+  template:
+    metadata:
+      labels: { app: order-service }
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: order-service
+          image: ${ECR_REGISTRY}/${PROJECT}/order-service:${IMAGE_TAG}
+          imagePullPolicy: Always
+          ports:
+            - { name: http, containerPort: 8081 }
+          # Settings from deploy/env/*.env and the secrets from deploy/env/secrets.env.
+          envFrom:
+            - configMapRef: { name: common-config }
+            - configMapRef: { name: order-service-config }
+            - secretRef: { name: app-secrets }
+          # CHANGE ME if your service has no /actuator/health (startupProbe waits up to 5 minutes).
+          startupProbe:
+            httpGet: { path: "/actuator/health", port: 8081 }
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: { path: "/actuator/health", port: 8081 }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: "/actuator/health", port: 8081 }
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 100m, memory: 384Mi }
+            limits: { memory: 768Mi }
