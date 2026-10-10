@@ -1,0 +1,63 @@
+# Executor service (Kafka consumer, market-data poller). Generic Java service: change only the lines marked  # <-- PROJECT
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: executor-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: executor-service}
+  template:
+    metadata:
+      labels: {app: executor-service}
+    spec:
+      enableServiceLinks: false
+      # Start only once Kafka answers and the topics job has created topics.
+      initContainers:
+        - name: wait-for-kafka
+          image: apache/kafka:3.8.0
+          command: ["/bin/sh", "-c", "until /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --list 2>/dev/null | grep -q .; do echo waiting for Kafka topics; sleep 5; done"]
+      containers:
+        - name: executor-service
+          image: executor-service            # real address set by `images:` in kustomization.yaml
+          ports:
+            - name: http
+              containerPort: 8082         # <-- PROJECT: the port the code listens on
+          # Every setting and secret, under the names the code reads.
+          envFrom:
+            - configMapRef: {name: app-config}
+            - secretRef: {name: app-secrets}
+          env:
+            # The listening port, set per pod (config.env is shared by every pod).
+            - {name: SERVER_PORT, value: "8082"}   # <-- PROJECT
+          volumeMounts:
+            - {name: shared-config, mountPath: /config, readOnly: true}
+          startupProbe:
+            tcpSocket: {port: http}   # <-- PROJECT: no health URL, so only check the port is open
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            tcpSocket: {port: http}   # <-- PROJECT
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: {port: http}   # <-- PROJECT
+            periodSeconds: 20
+          resources:
+            requests: {cpu: 100m, memory: 384Mi}
+            limits: {cpu: 1000m, memory: 768Mi}
+      volumes:
+        # The project's Config/application.yml, if it has one (see GUIDE.html).
+        - name: shared-config
+          configMap: {name: shared-config, optional: true}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: executor-service
+spec:
+  type: ClusterIP                     # the 1-four-elb overlay turns this into a LoadBalancer
+  selector: {app: executor-service}
+  ports:
+    - name: http
+      port: 8082                      # <-- PROJECT: same as containerPort
+      targetPort: http

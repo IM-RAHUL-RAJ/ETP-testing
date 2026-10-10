@@ -1,0 +1,224 @@
+# ==============================================================================
+# The whole application on one machine (an EC2 box or a laptop).
+#
+#   cp .env.example .env         put secrets, URLs and ports in .env
+#   docker compose up -d --build
+#   docker compose ps
+#
+# Generic: the same file serves every project shaped like this one
+# (frontend + auth BFF + order service + executor + Kafka + Postgres).
+# Every value is ${NAME:-default}; the default is this project's value, and
+# setting NAME in .env overrides it. Nothing below needs editing unless a
+# project's folders or variable names differ. The places that can differ are
+# marked  # <-- PROJECT  and listed in deploy/GUIDE.html, "What to change".
+#
+# Stages, all through .env:
+#   Postgres in a container    COMPOSE_PROFILES=localdb      (default in the guide)
+#   Postgres on RDS            COMPOSE_PROFILES=   and  DOCKER_DB_HOST=<rds endpoint>
+#   + the ETL worker           COMPOSE_PROFILES=localdb,etl
+# ==============================================================================
+
+name: ${PROJECT_NAME:-trading}
+
+# Every application container gets the whole .env (secrets included), so the
+# code finds its variables by whatever names it uses.
+x-app: &app
+  env_file: [.env]
+  restart: unless-stopped
+  networks: [app]
+  volumes:
+    # The project's shared config file, if it has one. A missing folder is harmless.
+    - ${CONFIG_DIR:-./Config}:/config:ro
+
+# Values that are different inside Docker from what .env says for a laptop.
+# Left side = the variable names THIS project's code reads.            # <-- PROJECT
+x-in-docker: &in-docker
+  DB_HOST: ${DOCKER_DB_HOST:-postgres}
+  KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+  SHARED_CONFIG: /config/application.yml
+  # node-postgres (auth BFF): "disable" for the container, "no-verify" for RDS.
+  PGSSLMODE: ${DOCKER_PGSSLMODE:-disable}
+
+services:
+  # ---------------------------------------------------------------- Postgres
+  # Only with COMPOSE_PROFILES=localdb. With RDS it is left out.
+  postgres:
+    image: postgres:16-alpine
+    profiles: [localdb]
+    environment:
+      POSTGRES_DB: ${DB_NAME:-trading_system_db}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      DB_INIT_FILES: ${DB_INIT_FILES:-schema.sql seed_data.sql}          # <-- PROJECT
+    ports:
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ${DB_INIT_DIR:-./Databases/PostgreSQL}:/sql:ro                    # <-- PROJECT
+      - ./deploy/postgres-init.sh:/docker-entrypoint-initdb.d/00-init.sh:ro
+    networks: [app]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # ---------------------------------------------------------------- Kafka
+  # One broker (KRaft, no ZooKeeper) with its data on a named volume.
+  # Containers use kafka:29092; tools on the machine itself use localhost:9092.
+  kafka:
+    image: apache/kafka:3.8.0
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_LISTENERS: INTERNAL://:29092,CONTROLLER://:29093,EXTERNAL://:9092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://${KAFKA_ADVERTISED_HOST:-localhost}:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: ${KAFKA_AUTO_CREATE_TOPICS:-false}
+      KAFKA_LOG_DIRS: /var/lib/kafka/data/kraft
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafkadata:/var/lib/kafka/data
+    networks: [app]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server kafka:29092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 18
+
+  # Creates the topics, then exits. Safe to run again: existing topics are kept.
+  # KAFKA_TOPICS = "name:partitions:retention-ms ..."                      # <-- PROJECT
+  kafka-init:
+    image: apache/kafka:3.8.0
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_TOPICS: ${KAFKA_TOPICS:-orders:3:604800000 trade-events:3:2592000000 market-data:6:86400000 orders.DLT:3:604800000 trade-events.DLT:3:2592000000 market-data.DLT:6:86400000}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        for t in $$KAFKA_TOPICS; do
+          name=$${t%%:*}; rest=$${t#*:}; parts=$${rest%%:*}; keep=$${rest#*:}
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --create --if-not-exists \
+            --topic "$$name" --partitions "$$parts" --replication-factor 1 --config retention.ms="$$keep"
+        done
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --list
+    networks: [app]
+    restart: "no"
+
+  # ---------------------------------------------------------------- Applications
+  auth-service:
+    <<: *app
+    build:
+      context: ${AUTH_DIR:-./Services/auth-service}                       # <-- PROJECT
+      args:
+        APP_PORT: ${AUTH_SERVICE_PORT:-3000}
+        HEALTH_PATH: ${AUTH_HEALTH_PATH:-/docs/json}
+    image: ${IMAGE_PREFIX:-trading}-auth-service:${TAG:-latest}
+    environment:
+      <<: *in-docker
+      PORT: ${AUTH_SERVICE_PORT:-3000}
+    ports:
+      - "${AUTH_SERVICE_PORT:-3000}:${AUTH_SERVICE_PORT:-3000}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+
+  order-service:
+    <<: *app
+    build:
+      context: ${ORDER_DIR:-./Services/order-service}                     # <-- PROJECT
+      args:
+        APP_PORT: ${ORDER_SERVICE_PORT:-8081}
+        HEALTH_PATH: ${ORDER_HEALTH_PATH:-/health}
+    image: ${IMAGE_PREFIX:-trading}-order-service:${TAG:-latest}
+    environment:
+      <<: *in-docker
+      SERVER_PORT: ${ORDER_SERVICE_PORT:-8081}
+    ports:
+      - "${ORDER_SERVICE_PORT:-8081}:${ORDER_SERVICE_PORT:-8081}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+      kafka-init:
+        condition: service_completed_successfully
+
+  executor-service:
+    <<: *app
+    build:
+      context: ${EXECUTOR_DIR:-./Services/executor-service}               # <-- PROJECT
+      args:
+        APP_PORT: ${EXECUTOR_SERVICE_PORT:-8082}
+        HEALTH_PATH: ${EXECUTOR_HEALTH_PATH:-}
+    image: ${IMAGE_PREFIX:-trading}-executor-service:${TAG:-latest}
+    environment:
+      <<: *in-docker
+      SERVER_PORT: ${EXECUTOR_SERVICE_PORT:-8082}
+    ports:
+      - "${EXECUTOR_SERVICE_PORT:-8082}:${EXECUTOR_SERVICE_PORT:-8082}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+      kafka-init:
+        condition: service_completed_successfully
+
+  frontend:
+    build:
+      context: ${FRONTEND_DIR:-./Frontend}                                # <-- PROJECT
+      args:
+        # Fallbacks for the build only; the addresses used are set below at start.
+        BUILD_ENV: AUTH_SERVICE_URL=http://localhost:3000 ORDER_SERVICE_URL=http://localhost:8081
+    image: ${IMAGE_PREFIX:-trading}-frontend:${TAG:-latest}
+    # Only the two public addresses; the frontend never sees a secret.
+    environment:
+      # The addresses the BROWSER calls: http://<EC2 public IP>:<port> on a box.
+      AUTH_SERVICE_URL: ${AUTH_SERVICE_URL:-http://localhost:3000}
+      ORDER_SERVICE_URL: ${ORDER_SERVICE_URL:-http://localhost:8081}
+    ports:
+      - "${FRONTEND_PORT:-4200}:80"
+    networks: [app]
+    restart: unless-stopped
+    depends_on:
+      - auth-service
+      - order-service
+
+  # ---------------------------------------------------------------- Optional
+  # PostgreSQL -> DuckDB analytics loop. Only with COMPOSE_PROFILES containing etl.
+  etl:
+    <<: *app
+    profiles: [etl]
+    build:
+      context: ${ETL_DIR:-./ETL Layer}                                    # <-- PROJECT
+    image: ${IMAGE_PREFIX:-trading}-etl:${TAG:-latest}
+    environment:
+      <<: *in-docker
+      DUCKDB_PATH: /data/analytics.duckdb
+    volumes:
+      - ${CONFIG_DIR:-./Config}:/config:ro
+      - duckdb:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+
+networks:
+  app:
+
+volumes:
+  pgdata:
+  kafkadata:
+  duckdb:

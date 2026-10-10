@@ -1,0 +1,879 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Step-by-step deployment of a capstone trading platform: EC2 and Docker, RDS, ECR, EKS with Kafka, four ELBs or one ALB and an Ingress, S3 and CloudFront, Route 53 and ACM.">
+<title>Capstone Deploy Guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root { color-scheme: light; --paper:#f2f5f0; --white:#fbfcf9; --ink:#172b27; --muted:#5d706a; --line:#c3cfc6; --teal:#08766c; --orange:#e56a42;
+  --good:#1f9d3a; --bad:#cf3b3b; --accent:#2f6fd6; --tint:#e6ebe4; --code:#152622; --code-text:#e7eee8;
+  --mono:"DM Mono","SFMono-Regular",Consolas,monospace; --sans:"Manrope","Aptos",sans-serif; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { color-scheme: dark; --paper:#101a18; --white:#16231f; --ink:#e7eee8; --muted:#9db0a9; --line:#3a4c46;
+  --teal:#4fc4b6; --orange:#f08a66; --good:#4cc76a; --bad:#f07070; --accent:#6fa3f5; --tint:#1d2c28; --code:#0b1412; } }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--paper); color:var(--ink); font:15px/1.65 var(--sans); }
+main { max-width:860px; margin:0 auto; padding:40px 16px 80px; }
+h1 { font-size:30px; line-height:1.2; margin:0 0 6px; font-weight:800; }
+h2 { font-size:21px; margin:48px 0 10px; padding-top:20px; border-top:1px solid var(--line); font-weight:700; }
+.sub { color:var(--muted); margin:0 0 24px; }
+a { color:var(--teal); } a:hover { color:var(--orange); }
+code { font:13px var(--mono); background:var(--tint); padding:1px 5px; border-radius:4px; overflow-wrap:anywhere; }
+pre { background:var(--code); color:var(--code-text); padding:14px 16px; border-radius:8px; overflow-x:auto; font:13px/1.6 var(--mono); }
+pre code { background:none; padding:0; color:inherit; }
+.callout { background:var(--white); border:1px solid var(--line); border-left:4px solid var(--orange); border-radius:8px; padding:12px 16px; margin:18px 0; }
+figcaption { color:var(--muted); font-size:12.5px; padding:4px 10px 6px; }
+.tablewrap { overflow-x:auto; margin:16px 0; }
+table { border-collapse:collapse; width:100%; background:var(--white); font-size:14px; }
+th,td { border:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top; }
+th { background:var(--tint); font-weight:700; }
+nav { background:var(--white); border:1px solid var(--line); border-radius:8px; padding:12px 16px 12px 34px; }
+nav ol { margin:0; padding:0; }
+
+h3 { font-size:16px; margin:26px 0 6px; font-weight:700; }
+.out { margin:-6px 0 16px; }
+.out span { display:block; font-size:11.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); margin:0 0 3px 2px; }
+.out pre { margin:0; background:var(--white); color:var(--ink); border:1px dashed var(--line); }
+.where { display:inline-block; margin:4px 0 8px; padding:2px 10px; border:1px solid var(--line); border-radius:999px; font-size:12.5px; color:var(--muted); background:var(--white); }
+ul,ol { padding-left:22px; } li { margin:4px 0; }:root[data-theme="dark"] { color-scheme: dark; --paper:#101a18; --white:#16231f; --ink:#e7eee8; --muted:#9db0a9; --line:#3a4c46;
+  --teal:#4fc4b6; --orange:#f08a66; --good:#4cc76a; --bad:#f07070; --accent:#6fa3f5; --tint:#1d2c28; --code:#0b1412; }
+nav ul { margin:0; padding-left:4px; }
+h2 { scroll-margin-top:12px; }
+
+
+</style>
+</head>
+<body>
+<main>
+<h1 id="trading-platform-ec2-docker-rds-eks-s3-cloudfront-and-route-53">Trading platform: EC2, Docker, RDS, EKS, S3, CloudFront and Route 53</h1>
+<p class="sub">One person, one AWS account, from nothing to <code>https://your-domain</code>. Written for <code>chennai-capstone-SE1-team3/Application</code> and made generic for the other projects with the same shape: an Angular frontend, a Node auth/BFF service, a Spring order service, a Spring executor, Kafka and Postgres.</p>
+
+<nav><ul>
+<li><a href="#0-what-is-in-the-kit">0. What is in the kit</a></li>
+<li><a href="#1-what-to-change-for-another-project">1. What to change for another project</a></li>
+<li><a href="#2-code-changes">2. Code changes</a></li>
+<li><a href="#3-the-ec2-box">3. The EC2 box</a></li>
+<li><a href="#4-docker-on-the-ec2-box">4. Docker on the EC2 box</a></li>
+<li><a href="#5-rds">5. RDS</a></li>
+<li><a href="#6-images-in-ecr">6. Images in ECR</a></li>
+<li><a href="#7-the-eks-cluster">7. The EKS cluster</a></li>
+<li><a href="#8-kubernetes-approach-1-four-load-balancers">8. Kubernetes, approach 1: four load balancers</a></li>
+<li><a href="#9-kubernetes-approach-2-one-alb-and-an-ingress">9. Kubernetes, approach 2: one ALB and an Ingress</a></li>
+<li><a href="#10-approach-3-frontend-on-s3-cloudfront-in-front">10. Approach 3: frontend on S3, CloudFront in front</a></li>
+<li><a href="#11-your-domain-route-53-and-acm">11. Your domain: Route 53 and ACM</a></li>
+<li><a href="#12-check-an-order-end-to-end-in-kafka">12. Check an order end to end in Kafka</a></li>
+<li><a href="#13-when-something-fails">13. When something fails</a></li>
+<li><a href="#14-cleaning-up-the-bill">14. Cleaning up (the bill)</a></li>
+</ul></nav>
+<h2 id="0-what-is-in-the-kit">0. What is in the kit</h2>
+<p>Everything is inside <code>Application/</code>. The project's own files are not changed, except three small frontend edits (section 2).</p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Path</th>
+<th>What it is</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Frontend/Dockerfile</code></td>
+<td>Generic Angular/React/Vue image: npm build, then nginx on port 80. Writes <code>app-config.js</code> (the API addresses) when the container starts</td>
+</tr>
+<tr>
+<td><code>Services/auth-service/Dockerfile</code></td>
+<td>Generic Node image (NestJS, Express, TypeScript or plain JS)</td>
+</tr>
+<tr>
+<td><code>Services/order-service/Dockerfile</code>, <code>Services/executor-service/Dockerfile</code></td>
+<td>The same generic Java/Maven file in both folders: any <code>pom.xml</code> that builds one runnable jar</td>
+</tr>
+<tr>
+<td><code>ETL Layer/Dockerfile</code></td>
+<td>Generic Python image (optional ETL worker)</td>
+</tr>
+<tr>
+<td><code>*/Dockerfile.999</code>, <code>docker-compose.9999.yml</code></td>
+<td>The project's original files, renamed so nothing uses them</td>
+</tr>
+<tr>
+<td><code>docker-compose.yaml</code></td>
+<td>Postgres, Kafka (with a disk), topic creation, the four applications, optional ETL</td>
+</tr>
+<tr>
+<td><code>k8s/cluster.yaml</code></td>
+<td>The EKS cluster, for <code>eksctl</code></td>
+</tr>
+<tr>
+<td><code>k8s/base/</code></td>
+<td>Namespace, gp3 disk type, Kafka (1 replica, 2 GiB EBS disk), the four applications, the Ingress, <code>config.env</code> (settings), <code>secrets.env.example</code> (secrets)</td>
+</tr>
+<tr>
+<td><code>k8s/overlays/1-four-elb/</code></td>
+<td>Approach 1: four load balancers, one per application</td>
+</tr>
+<tr>
+<td><code>k8s/overlays/2-ingress/</code></td>
+<td>Approach 2: one ALB and an Ingress for everything</td>
+</tr>
+<tr>
+<td><code>k8s/overlays/3-cloudfront/</code></td>
+<td>Approach 3: frontend on S3 + CloudFront, the ALB serves only the APIs</td>
+</tr>
+<tr>
+<td><code>deploy/*.sh</code></td>
+<td><code>load-db.sh</code> (SQL into RDS), <code>push-ecr.sh</code>, <code>set-urls.sh</code>, <code>install-lb-controller.sh</code>, <code>publish-frontend.sh</code>, <code>cloudfront.sh</code>, <code>domain.sh</code></td>
+</tr>
+<tr>
+<td><code>deploy/GUIDE.html</code></td>
+<td>This page</td>
+</tr>
+</tbody>
+</table></div>
+<p>The flow, and what the browser talks to at each stage:</p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>Browser opens</th>
+<th>Auth and order APIs reached at</th>
+<th>Section</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Docker on EC2</td>
+<td><code>http://&lt;EC2 IP&gt;:4200</code></td>
+<td><code>http://&lt;EC2 IP&gt;:3000</code> and <code>:8081</code></td>
+<td>4</td>
+</tr>
+<tr>
+<td>Docker on EC2 + RDS</td>
+<td>same</td>
+<td>same</td>
+<td>5</td>
+</tr>
+<tr>
+<td>EKS, four load balancers</td>
+<td><code>http://&lt;frontend ELB&gt;</code></td>
+<td><code>http://&lt;auth ELB&gt;:3000</code>, <code>http://&lt;order ELB&gt;:8081</code></td>
+<td>8</td>
+</tr>
+<tr>
+<td>EKS, one ALB + Ingress</td>
+<td><code>http://&lt;ALB&gt;</code></td>
+<td><code>http://&lt;ALB&gt;/auth/...</code>, <code>/api/...</code></td>
+<td>9</td>
+</tr>
+<tr>
+<td>S3 + CloudFront</td>
+<td><code>https://dxxxx.cloudfront.net</code></td>
+<td>the same address, <code>/auth/*</code> and <code>/api/*</code></td>
+<td>10</td>
+</tr>
+<tr>
+<td>Route 53 + ACM</td>
+<td><code>https://trade.your-domain</code></td>
+<td>the same address</td>
+<td>11</td>
+</tr>
+</tbody>
+</table></div>
+<div class="callout"><b>What was tested, 10 October 2026.</b> On a Linux machine with Docker: every image built from these Dockerfiles; <code>docker compose up</code> brought Postgres, Kafka, the topics and all four applications up healthy; a browser signed in as <code>demo</code> and loaded the dashboard both with separate API ports (EC2 style) and with page and APIs on one address (Ingress/CloudFront style); an order was placed and its <code>ORDER_PLACED</code> event reached Kafka and the executor; <code>load-db.sh</code> and the whole stack ran against a Postgres that only accepts encrypted connections (standing in for RDS); the 465 frontend unit tests pass with the code change. The Kubernetes files render with <code>kubectl kustomize</code> for all three approaches and were accepted by a Kubernetes 1.34 API server. <b>Not run:</b> anything in AWS (EC2, RDS, ECR, EKS, ALB, S3, CloudFront, Route 53, ACM), and an order being <i>filled</i> (the test machine could not reach the Fauxnance API). The AWS commands follow the ones that deployed ETP-testing.</div>
+
+<h2 id="1-what-to-change-for-another-project">1. What to change for another project</h2>
+<p>The files are generic: Dockerfiles take build arguments, compose takes <code>${NAME:-default}</code> values from <code>.env</code>, and Kubernetes reads every setting from <code>config.env</code> and <code>secrets.env</code>. For a new project, go down this table. Lines that differ between projects are marked <code># &lt;-- PROJECT</code> in the files.</p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>What</th>
+<th>Where</th>
+<th>This project</th>
+<th>How to find it in another project</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Folder of each component</td>
+<td><code>.env</code>: <code>FRONTEND_DIR</code>, <code>AUTH_DIR</code>, <code>ORDER_DIR</code>, <code>EXECUTOR_DIR</code>, <code>ETL_DIR</code></td>
+<td><code>./Frontend</code>, <code>./Services/auth-service</code>, ...</td>
+<td>The folders with <code>package.json</code> / <code>pom.xml</code></td>
+</tr>
+<tr>
+<td>Port each service listens on</td>
+<td><code>.env</code>: <code>AUTH_SERVICE_PORT</code>, <code>ORDER_SERVICE_PORT</code>, <code>EXECUTOR_SERVICE_PORT</code>; <code>k8s/base/&lt;service&gt;.yaml</code>: <code>containerPort</code>, Service <code>port</code>, the <code>PORT</code>/<code>SERVER_PORT</code> env; <code>k8s/base/ingress.yaml</code> port numbers; <code>deploy/set-urls.sh</code> <code>AUTH_PORT</code>/<code>ORDER_PORT</code></td>
+<td>3000, 8081, 8082</td>
+<td><code>server.port</code> in <code>application.yml</code>; <code>app.listen(...)</code> in <code>main.ts</code></td>
+</tr>
+<tr>
+<td>Health path (answers 200 without login)</td>
+<td><code>.env</code>: <code>AUTH_HEALTH_PATH</code>, <code>ORDER_HEALTH_PATH</code>, <code>EXECUTOR_HEALTH_PATH</code> (empty = port check); probes and <code>alb.ingress.kubernetes.io/healthcheck-path</code> in <code>k8s/base/&lt;service&gt;.yaml</code></td>
+<td><code>/docs/json</code>, <code>/health</code>, none</td>
+<td>A <code>@GetMapping("/health")</code>, Spring Actuator <code>/actuator/health</code>, Swagger <code>/docs</code> or <code>/api-docs</code></td>
+</tr>
+<tr>
+<td>Variable names the code reads</td>
+<td><code>docker-compose.yaml</code> block <code>x-in-docker</code>; <code>k8s/base/config.env</code>; <code>k8s/base/secrets.env</code></td>
+<td><code>DB_HOST</code>, <code>DB_PASSWORD</code>, <code>KAFKA_BOOTSTRAP_SERVERS</code>, <code>CORS_ALLOWED_ORIGINS</code>, ...</td>
+<td><code>${...}</code> in <code>application.yml</code>/<code>.properties</code>, <code>process.env.X</code>, <code>os.getenv("X")</code>, the project's <code>.env.example</code></td>
+</tr>
+<tr>
+<td>API path prefixes</td>
+<td><code>k8s/base/ingress.yaml</code> (<code>/auth</code>, <code>/api</code>); <code>deploy/cloudfront-distribution.json</code> (<code>/auth/*</code>, <code>/api/*</code>)</td>
+<td><code>/auth</code>, <code>/api</code></td>
+<td><code>@Controller('auth')</code>, <code>@RequestMapping("/api/v1/...")</code>. Must not clash with frontend routes</td>
+</tr>
+<tr>
+<td>SQL files and their order</td>
+<td><code>.env</code>: <code>DB_INIT_DIR</code>, <code>DB_INIT_FILES</code>; same variables for <code>deploy/load-db.sh</code></td>
+<td><code>schema.sql seed_data.sql</code></td>
+<td><code>Databases/</code> or <code>db/</code>; a folder name loads every <code>*.sql</code> in it by name</td>
+</tr>
+<tr>
+<td>Database name, user</td>
+<td><code>.env</code>: <code>DB_NAME</code>, <code>DB_USER</code>; <code>config.env</code></td>
+<td><code>trading_system_db</code>, <code>postgres</code></td>
+<td><code>.env.example</code>, <code>application.yml</code></td>
+</tr>
+<tr>
+<td>Kafka topics</td>
+<td><code>.env</code>: <code>KAFKA_TOPICS</code>; <code>config.env</code>: <code>KAFKA_TOPICS</code> (<code>name:partitions:retention-ms</code>)</td>
+<td>orders, trade-events, market-data + <code>.DLT</code></td>
+<td><code>create-topics.sh</code>, <code>@KafkaListener(topics=...)</code>, <code>topics:</code> in <code>application.yml</code></td>
+</tr>
+<tr>
+<td>Frontend's API address keys</td>
+<td>Frontend <code>RUNTIME_CONFIG</code> env (<code>Frontend/Dockerfile</code>, <code>k8s/base/frontend.yaml</code>); <code>deploy/publish-frontend.sh</code></td>
+<td><code>authApiUrl</code>, <code>tradeApiUrl</code></td>
+<td>The keys the app's <code>environment.ts</code> reads from <code>window.__APP_CONFIG__</code> (section 2)</td>
+</tr>
+<tr>
+<td>Image names</td>
+<td><code>.env</code>: <code>IMAGE_PREFIX</code>, <code>PROJECT_NAME</code>; <code>k8s/base/kustomization.yaml</code> <code>images:</code>; <code>deploy/push-ecr.sh</code></td>
+<td><code>trading-&lt;service&gt;</code></td>
+<td>Anything; one prefix per project</td>
+</tr>
+<tr>
+<td>Namespace</td>
+<td><code>k8s/base/kustomization.yaml</code> <code>namespace:</code></td>
+<td><code>trading</code></td>
+<td>One per project</td>
+</tr>
+<tr>
+<td>Shared config file</td>
+<td><code>docker-compose.yaml</code> <code>CONFIG_DIR</code>; <code>kubectl create configmap shared-config</code> (section 8)</td>
+<td><code>Config/application.yml</code></td>
+<td>Skip if the project has none: the mount is optional</td>
+</tr>
+<tr>
+<td>Java / Node version</td>
+<td>build arg <code>JAVA_VERSION</code> (default 21), <code>NODE_VERSION</code> (22)</td>
+<td>21, 22</td>
+<td><code>&lt;java.version&gt;</code> in <code>pom.xml</code>; <code>engines</code> in <code>package.json</code></td>
+</tr>
+<tr>
+<td>Angular build output</td>
+<td>found automatically (first <code>index.html</code> under <code>dist/</code> or <code>build/</code>)</td>
+<td><code>dist/trading-app-ui/browser</code></td>
+<td>nothing to change</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="where-urls-keys-ports-and-cors-go-at-each-stage">Where URLs, keys, ports and CORS go at each stage</h3>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Docker on EC2 (<code>.env</code>)</th>
+<th>EKS (<code>k8s/base/config.env</code> or the overlay's <code>urls.env</code>)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Browser → auth address</td>
+<td><code>AUTH_SERVICE_URL=http://&lt;IP&gt;:3000</code></td>
+<td><code>BROWSER_AUTH_URL</code>: four ELBs = set by <code>set-urls.sh</code>; ALB and CloudFront = empty</td>
+</tr>
+<tr>
+<td>Browser → order address</td>
+<td><code>ORDER_SERVICE_URL=http://&lt;IP&gt;:8081</code></td>
+<td><code>BROWSER_ORDER_URL</code>: as above</td>
+</tr>
+<tr>
+<td>CORS allowed origins</td>
+<td><code>CORS_ALLOWED_ORIGINS=http://&lt;IP&gt;:4200</code></td>
+<td><code>CORS_ALLOWED_ORIGINS</code> in <code>urls.env</code>: the frontend's address, then <code>https://&lt;domain&gt;,https://&lt;cloudfront&gt;</code></td>
+</tr>
+<tr>
+<td>Frontend address</td>
+<td><code>FRONTEND_URL=http://&lt;IP&gt;:4200</code></td>
+<td><code>FRONTEND_URL</code> in <code>urls.env</code></td>
+</tr>
+<tr>
+<td>Login cookie</td>
+<td><code>COOKIE_SECURE=false</code> (plain http)</td>
+<td><code>false</code> for ELB/ALB, <code>true</code> for CloudFront</td>
+</tr>
+<tr>
+<td>Database</td>
+<td>container <code>postgres</code>, or <code>DOCKER_DB_HOST=&lt;RDS&gt;</code></td>
+<td><code>DB_HOST=&lt;RDS endpoint&gt;</code>, <code>PGSSLMODE=no-verify</code></td>
+</tr>
+<tr>
+<td>Kafka</td>
+<td><code>kafka:29092</code> (set by compose)</td>
+<td><code>kafka:29092</code></td>
+</tr>
+<tr>
+<td>Secrets</td>
+<td><code>DB_PASSWORD</code>, <code>JWT_SECRET</code>, <code>FAUXNANCE_API_KEY</code>, <code>SMTP_PASS</code>, <code>GROQ_API_KEY</code> in <code>.env</code></td>
+<td>the same names in <code>k8s/base/secrets.env</code></td>
+</tr>
+</tbody>
+</table></div>
+<div class="callout"><b>CORS: list the addresses, do not use <code>*</code>.</b> Both services send the login cookie (<code>credentials</code>), and browsers refuse <code>Access-Control-Allow-Origin: *</code> together with credentials; Spring even refuses to start with <code>*</code> and <code>allowCredentials(true)</code>. <code>CORS_ALLOWED_ORIGINS</code> takes a comma-separated list of exact origins (<code>scheme://host[:port]</code>, no trailing slash), so every stage is a setting, not a code change. With one ALB or CloudFront the page and the APIs share one address and CORS does not apply at all.</div>
+
+<h2 id="2-code-changes">2. Code changes</h2>
+<h3 id="21-angular-read-the-api-addresses-at-start-not-at-build-done-in-this-kit">2.1 Angular: read the API addresses at start, not at build (done in this kit)</h3>
+<p>An Angular build is static files: whatever address is compiled in is used everywhere the image runs. This project generated <code>src/environments/*.ts</code> from <code>Config/application.yml</code> at build time, so one image could only ever call <code>localhost</code>. Three edits make the addresses a runtime setting; <code>npm start</code> on a laptop behaves exactly as before.</p>
+<p><strong><code>Frontend/src/index.html</code></strong>, inside <code>&lt;head&gt;</code>, before the app:</p>
+<pre><code class="language-html">&lt;base href=&quot;/&quot;&gt;
+&lt;!-- API addresses written when the container starts (see Dockerfile); must load before the app. --&gt;
+&lt;script src=&quot;app-config.js&quot;&gt;&lt;/script&gt;
+</code></pre>
+<p><strong><code>Frontend/public/app-config.js</code></strong> (new; the container overwrites it):</p>
+<pre><code class="language-js">window.__APP_CONFIG__ = window.__APP_CONFIG__ || {};
+</code></pre>
+<p><strong><code>Frontend/scripts/sync-config.mjs</code></strong>, the template it writes into <code>src/environments/environment*.ts</code> (both regenerated):</p>
+<pre><code class="language-ts">const runtime = (globalThis as { __APP_CONFIG__?: { tradeApiUrl?: string; authApiUrl?: string } }).__APP_CONFIG__ ?? {};
+const pick = (value: string | undefined, fallback: string): string =&gt;
+  (typeof value === 'string' ? value : fallback).replace(/\/+$/, '');
+const tradeApiUrl = pick(runtime.tradeApiUrl, 'http://localhost:8081');   // build-time default
+const authApiUrl = pick(runtime.authApiUrl, 'http://localhost:3000');
+/** The origin a URL points at; a relative or empty URL is the page's own origin. */
+const originOf = (url: string): string =&gt; new URL(url || '/', globalThis.location?.origin).origin;
+...
+  platformOrigins: [originOf(tradeApiUrl), originOf(authApiUrl)],
+</code></pre>
+<p><strong><code>Frontend/src/app/core/interceptors/auth.interceptor.ts</code></strong>: relative URLs (<code>/api/v1/...</code>, used when the address is empty) are resolved against the page, so they still get the bearer token:</p>
+<pre><code class="language-ts">const parsed = new URL(url, globalThis.location?.origin);
+...
+if (target.origin === new URL(environment.authApiUrl || '/', globalThis.location?.origin).origin) {
+</code></pre>
+<p><strong>For another Angular project:</strong> find where the base URL lives (<code>environment.ts</code>, an <code>API_URL</code> constant, an <code>HttpInterceptor</code>), make it read <code>window.__APP_CONFIG__.&lt;key&gt;</code> first, add the <code>&lt;script&gt;</code> and <code>public/app-config.js</code>, then set <code>RUNTIME_CONFIG</code> to <code>key:ENV_VAR</code> pairs (default <code>authApiUrl:AUTH_SERVICE_URL,tradeApiUrl:ORDER_SERVICE_URL</code>). An empty value means "same address as the page", so services must be called with paths like <code>${base}/api/...</code>. Angular versions before 17 keep static files in <code>src/assets/</code> instead of <code>public/</code>: put <code>app-config.js</code> there and use <code>&lt;script src="assets/app-config.js"&gt;</code>, and set <code>RUNTIME_CONFIG</code>'s output path accordingly in the Dockerfile's script (the file it writes).</p>
+<h3 id="22-backends-nothing-to-change-in-this-project">2.2 Backends: nothing to change in this project</h3>
+<p>Every address, port and secret is already read from environment variables with a fallback to <code>Config/application.yml</code>; CORS (<code>CORS_ALLOWED_ORIGINS</code>) and the cookie flag (<code>COOKIE_SECURE</code>) are settings. Things to check in other projects:</p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Look for</th>
+<th>If found</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>localhost</code> or a fixed URL in Java/TS code</td>
+<td>Replace with <code>${SOME_URL:http://localhost:8081}</code> (Spring) or <code>process.env.SOME_URL ?? 'http://localhost:3000'</code> (Node), then add the variable to <code>config.env</code></td>
+</tr>
+<tr>
+<td>CORS origins fixed in code (<code>@CrossOrigin(origins="http://localhost:4200")</code>, <code>allowedOrigins("...")</code>, <code>enableCors({origin: '...'})</code>)</td>
+<td>Read them from a variable, as this project does: <code>cors.allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:4200}</code></td>
+</tr>
+<tr>
+<td><code>allowedOrigins("*")</code> with <code>allowCredentials(true)</code></td>
+<td>Spring refuses to start. Use the variable, or <code>allowedOriginPatterns("*")</code> only for a throw-away demo</td>
+</tr>
+<tr>
+<td>A refresh cookie with <code>secure: true</code> fixed</td>
+<td>Make it a setting: browsers drop Secure cookies over plain http (EC2 IP, ELB, ALB)</td>
+</tr>
+<tr>
+<td>Node <code>pg</code> with no <code>ssl</code> option</td>
+<td>Set <code>PGSSLMODE=no-verify</code> for RDS (already in <code>config.env</code>); <code>pg</code> reads it</td>
+</tr>
+<tr>
+<td><code>spring.datasource.url</code> with <code>localhost</code></td>
+<td><code>jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:...}</code></td>
+</tr>
+<tr>
+<td>A jar name fixed in the old Dockerfile (here: <code>sprint-06-trade-api-1.0-SNAPSHOT.jar</code>)</td>
+<td>Nothing: the generic Dockerfile copies whichever jar Maven built</td>
+</tr>
+<tr>
+<td>Frontend routes that start with <code>/auth</code> or <code>/api</code></td>
+<td>Rename them, or change the Ingress/CloudFront prefixes: those paths go to the backends</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="3-the-ec2-box">3. The EC2 box</h2>
+<h3 id="31-launch-it">3.1 Launch it</h3>
+<p><span class="where">AWS console, your region</span></p>
+<ol>
+<li>EC2 → Launch instance. Name <code>deploy-box</code>. AMI <strong>Amazon Linux 2023</strong>. Type <strong>t3.xlarge</strong> (4 vCPU, 16 GB). Storage <strong>30 GB gp3</strong>.</li>
+<li>Key pair: none needed (Session Manager is used). Network: default VPC, a public subnet, auto-assign public IP <strong>on</strong>.</li>
+<li>Security group <code>deploy-box-sg</code>, inbound from <strong>My IP</strong> only: TCP <strong>4200</strong> (page), <strong>3000</strong> (auth), <strong>8081</strong> (order API). Nothing for 22, 5432, 9092 or 8082.</li>
+<li>Advanced details → IAM instance profile: a role with <strong>AmazonSSMManagedInstanceCore</strong> and, because eksctl creates VPCs, IAM roles and CloudFormation stacks, <strong>AdministratorAccess</strong> (your own sandbox account only). The box then needs no access keys; never put keys in a file or in git.</li>
+<li>Launch, then Connect → Session Manager → Connect, and <code>sudo su - ec2-user</code>.</li>
+</ol>
+<p>Optional: allocate an Elastic IP and associate it, so the IP in <code>.env</code> survives a stop/start.</p>
+<h3 id="32-install-the-tools">3.2 Install the tools</h3>
+<p><span class="where">EC2 box, as ec2-user</span></p>
+<pre><code class="language-bash">sudo dnf install -y git docker jq
+sudo systemctl enable --now docker
+sudo usermod -aG docker ec2-user &amp;&amp; newgrp docker
+
+# docker compose v2 and buildx (Amazon Linux's docker package has neither)
+sudo mkdir -p /usr/local/lib/docker/cli-plugins
+sudo curl -fsSL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 \
+  -o /usr/local/lib/docker/cli-plugins/docker-compose
+BX=$(curl -fsSL -o /dev/null -w '%{url_effective}' https://github.com/docker/buildx/releases/latest | sed 's#.*/tag/##')
+sudo curl -fsSL https://github.com/docker/buildx/releases/download/$BX/buildx-$BX.linux-amd64 \
+  -o /usr/local/lib/docker/cli-plugins/docker-buildx
+sudo chmod +x /usr/local/lib/docker/cli-plugins/*
+
+# kubectl (match the cluster version), eksctl
+curl -fsSL --retry 5 -o kubectl https://dl.k8s.io/release/v1.34.0/bin/linux/amd64/kubectl
+sudo install -m 0755 kubectl /usr/local/bin/kubectl &amp;&amp; rm kubectl
+curl -fsSL --retry 5 https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_Linux_amd64.tar.gz | tar xz -C /tmp
+sudo mv /tmp/eksctl /usr/local/bin/
+
+docker compose version; docker buildx version; kubectl version --client; eksctl version; aws --version
+aws sts get-caller-identity      # must show the box's role in YOUR account
+</code></pre>
+<div class="out"><span>Expected</span><pre>Docker Compose version v2.x / v5.x
+github.com/docker/buildx v0.x ...
+Client Version: v1.34.0
+0.2xx.x
+aws-cli/2.x ...
+{ "Account": "&lt;your account&gt;", "Arn": "arn:aws:sts::&lt;account&gt;:assumed-role/&lt;role&gt;/i-..." }</pre></div>
+
+<h3 id="33-get-the-code">3.3 Get the code</h3>
+<p>The team repository is private: clone it with a GitHub token (Settings → Developer settings → Personal access tokens, scope <code>repo</code>, then "Configure SSO" for the organisation). Type the token only at the password prompt.</p>
+<pre><code class="language-bash">git clone https://github.com/Neueda-Learning/chennai-capstone-SE1-team3.git
+cd chennai-capstone-SE1-team3/Application
+ls Dockerfile* */Dockerfile* Services/*/Dockerfile* docker-compose*    # the kit's files are present
+</code></pre>
+<p>If the kit is not in that repository yet, copy its files in (they are on branch <code>team3-deploy-kit</code> of <code>IM-RAHUL-RAJ/ETP-testing</code>, folder <code>team3-deploy-kit/Application/</code>):</p>
+<pre><code class="language-bash">git clone -b team3-deploy-kit https://github.com/IM-RAHUL-RAJ/ETP-testing.git /tmp/kit
+cp -r /tmp/kit/team3-deploy-kit/Application/. .
+# the originals, renamed so they are not used
+for f in Frontend Services/auth-service Services/order-service Services/executor-service &quot;ETL Layer&quot;; do
+  [ -f &quot;$f/Dockerfile.999&quot; ] || git mv &quot;$f/Dockerfile&quot; &quot;$f/Dockerfile.999&quot; 2&gt;/dev/null; done
+cp -r /tmp/kit/team3-deploy-kit/Application/. .     # again, so the new Dockerfiles are in place
+[ -f docker-compose.yml ] &amp;&amp; git mv docker-compose.yml docker-compose.9999.yml
+</code></pre>
+<h2 id="4-docker-on-the-ec2-box">4. Docker on the EC2 box</h2>
+<p><span class="where">EC2 box, in Application/</span></p>
+<h3 id="41-env">4.1 <code>.env</code></h3>
+<p><code>.env</code> is never committed. Start from the project's template and set what differs on this box:</p>
+<pre><code class="language-bash">cp .env.example .env
+IP=$(curl -s https://checkip.amazonaws.com)
+sed -i \
+  -e &quot;s|^FRONTEND_URL=.*|FRONTEND_URL=http://$IP:4200|&quot; \
+  -e &quot;s|^AUTH_SERVICE_URL=.*|AUTH_SERVICE_URL=http://$IP:3000|&quot; \
+  -e &quot;s|^ORDER_SERVICE_URL=.*|ORDER_SERVICE_URL=http://$IP:8081|&quot; \
+  -e &quot;s|^CORS_ALLOWED_ORIGINS=.*|CORS_ALLOWED_ORIGINS=http://$IP:4200|&quot; \
+  -e &quot;s|^COOKIE_SECURE=.*|COOKIE_SECURE=false|&quot; \
+  -e &quot;s|^KAFKA_ADVERTISED_HOST=.*|KAFKA_ADVERTISED_HOST=localhost|&quot; \
+  .env
+cat &gt;&gt; .env &lt;&lt;'EOF'
+
+# ---- deployment kit ----
+COMPOSE_PROFILES=localdb
+PROJECT_NAME=trading
+IMAGE_PREFIX=trading
+EOF
+vi .env    # set DB_PASSWORD, JWT_SECRET (openssl rand -base64 48), FAUXNANCE_API_KEY;
+           # SMTP_* for real emails, or SMTP_HOST= (empty) to log sign-up codes instead; GROQ_API_KEY optional
+grep -E '^(FRONTEND_URL|AUTH_SERVICE_URL|ORDER_SERVICE_URL|CORS_ALLOWED_ORIGINS|COOKIE_SECURE|COMPOSE_PROFILES)=' .env
+</code></pre>
+<p>Why these: the page runs in <strong>your</strong> browser, so the addresses it calls must be the box's public IP, not <code>localhost</code> (which would be your laptop). The trade API and auth service only accept calls from pages on <code>CORS_ALLOWED_ORIGINS</code>. Browsers drop <code>Secure</code> cookies over plain http, which would end the session after 15 minutes.</p>
+<h3 id="42-build-and-run">4.2 Build and run</h3>
+<pre><code class="language-bash">docker compose up -d --build        # first build: about 10 minutes (Maven and npm downloads)
+docker compose ps
+</code></pre>
+<div class="out"><span>Expected</span><pre>SERVICE            STATUS
+auth-service       Up 2 minutes (healthy)
+executor-service   Up 2 minutes (healthy)
+frontend           Up 2 minutes (healthy)
+kafka              Up 2 minutes (healthy)
+order-service      Up 2 minutes (healthy)
+postgres           Up 2 minutes (healthy)</pre></div>
+
+<p><code>kafka-init</code> runs once, creates the topics and exits (<code>docker compose ps -a</code> shows it <code>Exited (0)</code>). On a smaller box, build one image at a time: <code>COMPOSE_PARALLEL_LIMIT=1 docker compose build</code>.</p>
+<h3 id="43-test">4.3 Test</h3>
+<pre><code class="language-bash">curl -s localhost:4200/app-config.js                     # the addresses the browser will use
+curl -s localhost:8081/health; echo
+curl -s -X POST localhost:3000/auth/login -H 'Content-Type: application/json' \
+  -d '{&quot;identifier&quot;:&quot;demo&quot;,&quot;password&quot;:&quot;Capstone@2026&quot;}' | head -c 80; echo
+docker compose exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --list
+</code></pre>
+<div class="out"><span>Expected</span><pre>window.__APP_CONFIG__ = {
+  "authApiUrl": "http://&lt;IP&gt;:3000",
+  "tradeApiUrl": "http://&lt;IP&gt;:8081"
+};
+{"status":"ok","dependencies":[{"name":"postgres","status":"ok",...},{"name":"fauxnance","status":"ok",...},{"name":"kafka","status":"ok",...}]}
+{"accessToken":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+market-data
+market-data.DLT
+orders
+orders.DLT
+trade-events
+trade-events.DLT</pre></div>
+
+<p>Then in a browser: <code>http://&lt;IP&gt;:4200</code>, sign in as <code>demo</code> / <code>Capstone@2026</code> (admin: <code>admin</code> / <code>Admin@2026</code>), place an order. <code>fauxnance: degraded</code> in <code>/health</code> means the key or URL is wrong: orders then stay <code>NEW</code>.</p>
+<p>Useful: <code>docker compose logs -f order-service</code>, <code>docker compose down</code> (keeps data), <code>docker compose down -v</code> (wipes Postgres and Kafka; the SQL loads again on next start).</p>
+<h2 id="5-rds">5. RDS</h2>
+<h3 id="51-create-the-database">5.1 Create the database</h3>
+<p><span class="where">EC2 box</span></p>
+<pre><code class="language-bash">REGION=$(aws configure get region || curl -s http://169.254.169.254/latest/meta-data/placement/region)
+VPC=$(aws ec2 describe-vpcs --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' --output text)
+BOX_SG=$(aws ec2 describe-security-groups --filters Name=group-name,Values=deploy-box-sg --query 'SecurityGroups[0].GroupId' --output text)
+
+RDS_SG=$(aws ec2 create-security-group --group-name trading-rds-sg --description &quot;Postgres for the trading app&quot; \
+  --vpc-id $VPC --query GroupId --output text)
+# the box may connect (same VPC)
+aws ec2 authorize-security-group-ingress --group-id $RDS_SG --protocol tcp --port 5432 --source-group $BOX_SG
+
+read -s -p &quot;RDS master password: &quot; PGPASSWORD; export PGPASSWORD; echo
+aws rds create-db-instance --db-instance-identifier trading-db \
+  --engine postgres --db-instance-class db.t4g.micro --allocated-storage 20 --storage-type gp3 \
+  --master-username postgres --master-user-password &quot;$PGPASSWORD&quot; \
+  --vpc-security-group-ids $RDS_SG --publicly-accessible --backup-retention-period 0 --no-multi-az \
+  --query 'DBInstance.DBInstanceStatus' --output text
+aws rds wait db-instance-available --db-instance-identifier trading-db       # 5-10 silent minutes
+RDS=$(aws rds describe-db-instances --db-instance-identifier trading-db --query 'DBInstances[0].Endpoint.Address' --output text)
+echo $RDS
+</code></pre>
+<p>"Publicly accessible" gives it a public name; the security group still decides who may connect. Never open 5432 to <code>0.0.0.0/0</code>.</p>
+<h3 id="52-load-the-schema-and-seed-data">5.2 Load the schema and seed data</h3>
+<pre><code class="language-bash">deploy/load-db.sh $RDS
+</code></pre>
+<div class="out"><span>Expected</span><pre>CREATE DATABASE
+== schema.sql
+== seed_data.sql
+ table_schema | tables
+--------------+--------
+ auth         |      5
+ trading      |     18</pre></div>
+
+<p>Run it once: seed data is not written to be loaded twice. To start over: <code>psql ... -f reset.sql</code> (in <code>Databases/PostgreSQL</code>), then this script again.</p>
+<h3 id="53-point-docker-at-rds">5.3 Point Docker at RDS</h3>
+<pre><code class="language-bash">sed -i -e 's|^COMPOSE_PROFILES=.*|COMPOSE_PROFILES=|' -e &quot;s|^DB_PASSWORD=.*|DB_PASSWORD=$PGPASSWORD|&quot; .env
+cat &gt;&gt; .env &lt;&lt;EOF
+DOCKER_DB_HOST=$RDS
+DOCKER_PGSSLMODE=no-verify
+EOF
+docker compose up -d --remove-orphans      # the postgres container is no longer started
+docker compose ps
+</code></pre>
+<p><code>DOCKER_PGSSLMODE=no-verify</code> makes the Node auth service encrypt its connection (RDS for PostgreSQL 15+ refuses unencrypted ones); the Java driver encrypts by itself. Test as in 4.3: a login proves auth reads RDS, <code>/health</code> shows <code>postgres: ok</code> for the order service.</p>
+<h2 id="6-images-in-ecr">6. Images in ECR</h2>
+<p><span class="where">EC2 box, in Application/</span></p>
+<pre><code class="language-bash">export AWS_REGION=$REGION
+deploy/push-ecr.sh 1.0
+</code></pre>
+<p>It creates <code>trading-frontend</code>, <code>trading-auth-service</code>, <code>trading-order-service</code>, <code>trading-executor-service</code> the first time, logs Docker in to ECR and pushes the images compose built. Then put the printed registry in <strong><code>k8s/base/kustomization.yaml</code></strong> under <code>images:</code>:</p>
+<pre><code class="language-bash">ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+sed -i &quot;s|ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com|$ACCOUNT.dkr.ecr.$REGION.amazonaws.com|&quot; k8s/base/kustomization.yaml
+grep newName k8s/base/kustomization.yaml
+</code></pre>
+<p>For a code change later: <code>docker compose build &lt;service&gt;</code>, <code>deploy/push-ecr.sh 1.1</code>, set <code>newTag: "1.1"</code>, <code>kubectl apply -k ...</code>. Always a new tag.</p>
+<h2 id="7-the-eks-cluster">7. The EKS cluster</h2>
+<h3 id="71-create-it">7.1 Create it</h3>
+<pre><code class="language-bash">sed -i &quot;s|region: ap-south-1|region: $REGION|&quot; k8s/cluster.yaml     # if your region differs
+eksctl create cluster -f k8s/cluster.yaml                         # 15-20 minutes
+kubectl get nodes
+</code></pre>
+<div class="out"><span>Expected</span><pre>NAME                                           STATUS   ROLES    AGE   VERSION
+ip-192-168-x-x.ap-south-1.compute.internal     Ready    &lt;none&gt;   2m    v1.34.x-eks-...
+ip-192-168-y-y.ap-south-1.compute.internal     Ready    &lt;none&gt;   2m    v1.34.x-eks-...</pre></div>
+
+<p>The cluster gets its own VPC (<code>192.168.0.0/16</code>), two <code>t3.medium</code> workers in private subnets and the EBS CSI add-on (Kafka's disk). The box's role created it, so <code>kubectl</code> on the box is already an administrator; to use it from another identity, add an access entry (EKS → cluster → Access → Create access entry, policy <code>AmazonEKSClusterAdminPolicy</code>).</p>
+<h3 id="72-let-the-cluster-reach-rds-vpc-peering">7.2 Let the cluster reach RDS: VPC peering</h3>
+<p>RDS is in the default VPC (<code>172.31.0.0/16</code>), the pods in the cluster's VPC. Peering joins them privately; one security group rule then covers every node, including replaced ones.</p>
+<pre><code class="language-bash">EKS_VPC=$(aws eks describe-cluster --name capstone --query 'cluster.resourcesVpcConfig.vpcId' --output text)
+EKS_CIDR=$(aws ec2 describe-vpcs --vpc-ids $EKS_VPC --query 'Vpcs[0].CidrBlock' --output text)
+RDS_CIDR=$(aws ec2 describe-vpcs --vpc-ids $VPC --query 'Vpcs[0].CidrBlock' --output text)
+echo &quot;cluster $EKS_CIDR  database $RDS_CIDR&quot;     # must not overlap
+
+PCX=$(aws ec2 create-vpc-peering-connection --vpc-id $EKS_VPC --peer-vpc-id $VPC \
+  --query 'VpcPeeringConnection.VpcPeeringConnectionId' --output text)
+aws ec2 accept-vpc-peering-connection --vpc-peering-connection-id $PCX --query 'VpcPeeringConnection.Status.Code' --output text
+sleep 5
+# the RDS name resolves to its PRIVATE address from the cluster, so traffic uses the link
+aws ec2 modify-vpc-peering-connection-options --vpc-peering-connection-id $PCX \
+  --requester-peering-connection-options AllowDnsResolutionFromRemoteVpc=true \
+  --accepter-peering-connection-options AllowDnsResolutionFromRemoteVpc=true
+
+for rt in $(aws ec2 describe-route-tables --filters Name=vpc-id,Values=$EKS_VPC --query 'RouteTables[].RouteTableId' --output text); do
+  aws ec2 create-route --route-table-id $rt --destination-cidr-block $RDS_CIDR --vpc-peering-connection-id $PCX &gt;/dev/null; done
+for rt in $(aws ec2 describe-route-tables --filters Name=vpc-id,Values=$VPC --query 'RouteTables[].RouteTableId' --output text); do
+  aws ec2 create-route --route-table-id $rt --destination-cidr-block $EKS_CIDR --vpc-peering-connection-id $PCX &gt;/dev/null; done
+aws ec2 authorize-security-group-ingress --group-id $RDS_SG --protocol tcp --port 5432 --cidr $EKS_CIDR
+
+# test from a pod
+kubectl run pgtest --restart=Never --image=postgres:16-alpine -- pg_isready -h $RDS -p 5432 -t 10
+sleep 20; kubectl logs pgtest; kubectl delete pod pgtest
+</code></pre>
+<div class="out"><span>Expected</span><pre>pcx-... provisioning
+...
+&lt;rds endpoint&gt;:5432 - accepting connections</pre></div>
+
+<p>Simpler alternative without peering (the database stays public): allow the cluster's NAT gateway address instead of <code>$EKS_CIDR</code>: <code>aws ec2 describe-nat-gateways --filter Name=vpc-id,Values=$EKS_VPC --query 'NatGateways[0].NatGatewayAddresses[0].PublicIp'</code>, then <code>--cidr &lt;that IP&gt;/32</code>. That goes over the internet; peering does not.</p>
+<h2 id="8-kubernetes-approach-1-four-load-balancers">8. Kubernetes, approach 1: four load balancers</h2>
+<h3 id="81-the-files">8.1 The files</h3>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>File</th>
+<th>Creates</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>base/namespace.yaml</code></td>
+<td>Namespace (<code>trading</code>, from <code>kustomization.yaml</code>)</td>
+</tr>
+<tr>
+<td><code>base/storageclass.yaml</code></td>
+<td>Disk type <code>gp3</code> (encrypted EBS)</td>
+</tr>
+<tr>
+<td><code>base/kafka.yaml</code></td>
+<td>Headless Service <code>kafka</code>, StatefulSet with <strong>1 replica</strong> and a <strong>2 GiB</strong> volume (<code>volumeClaimTemplates</code>), Job that creates <code>KAFKA_TOPICS</code></td>
+</tr>
+<tr>
+<td><code>base/auth-service.yaml</code>, <code>order-service.yaml</code>, <code>executor-service.yaml</code>, <code>frontend.yaml</code></td>
+<td>One Deployment (1 replica, probes, CPU/memory limits) and one internal Service each</td>
+</tr>
+<tr>
+<td><code>base/config.env</code> → ConfigMap <code>app-config</code></td>
+<td>Every non-secret setting, under the names the code reads, given to every pod (<code>envFrom</code>)</td>
+</tr>
+<tr>
+<td><code>base/secrets.env</code> → Secret <code>app-secrets</code></td>
+<td>Passwords and keys (<code>envFrom</code>); the file is git-ignored</td>
+</tr>
+<tr>
+<td><code>shared-config</code> ConfigMap (made by a command)</td>
+<td><code>Config/application.yml</code>, mounted at <code>/config</code> (optional)</td>
+</tr>
+<tr>
+<td><code>base/ingress.yaml</code></td>
+<td>The ALB rules (approaches 2 and 3)</td>
+</tr>
+<tr>
+<td><code>overlays/1-four-elb</code></td>
+<td>Turns the four Services into <code>type: LoadBalancer</code>, removes the Ingress, adds <code>urls.env</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>Kustomize gives the ConfigMap and Secret a new name whenever their content changes, so <code>kubectl apply -k</code> restarts exactly the pods that use them; no manual restart. <code>order-service</code> and <code>executor-service</code> wait (init container) until Kafka has topics.</p>
+<h3 id="82-settings-secrets-apply">8.2 Settings, secrets, apply</h3>
+<pre><code class="language-bash">sed -i &quot;s|^DB_HOST=.*|DB_HOST=$RDS|&quot; k8s/base/config.env
+cp k8s/base/secrets.env.example k8s/base/secrets.env
+vi k8s/base/secrets.env      # DB_PASSWORD, JWT_SECRET, FAUXNANCE_API_KEY, SMTP_PASS, GROQ_API_KEY
+
+kubectl apply -k k8s/overlays/1-four-elb
+kubectl -n trading create configmap shared-config --from-file=application.yml=Config/application.yml \
+  --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n trading get pods,pvc,svc
+</code></pre>
+<div class="out"><span>Expected after 2-4 minutes</span><pre>NAME                                    READY   STATUS      RESTARTS
+pod/auth-service-...                    1/1     Running     0
+pod/executor-service-...                1/1     Running     0
+pod/frontend-...                        1/1     Running     0
+pod/kafka-0                             1/1     Running     0
+pod/kafka-topics-...                    0/1     Completed   0
+pod/order-service-...                   1/1     Running     0
+NAME                                 STATUS   VOLUME    CAPACITY   STORAGECLASS
+persistentvolumeclaim/data-kafka-0   Bound    pvc-...   2Gi        gp3
+NAME               TYPE           EXTERNAL-IP                                 PORT(S)
+auth-service       LoadBalancer   a1....ap-south-1.elb.amazonaws.com          3000:3xxxx/TCP
+executor-service   LoadBalancer   a2....ap-south-1.elb.amazonaws.com          8082:3xxxx/TCP
+frontend           LoadBalancer   a3....ap-south-1.elb.amazonaws.com          80:3xxxx/TCP
+kafka              ClusterIP      None                                        29092/TCP,9093/TCP
+order-service      LoadBalancer   a4....ap-south-1.elb.amazonaws.com          8081:3xxxx/TCP</pre></div>
+
+<h3 id="83-give-the-browser-the-load-balancer-addresses">8.3 Give the browser the load balancer addresses</h3>
+<pre><code class="language-bash">deploy/set-urls.sh
+</code></pre>
+<p>It waits for the hostnames, writes <code>k8s/overlays/1-four-elb/urls.env</code> (auth and order addresses for the browser, the frontend's address for CORS) and applies it. Open the printed address (give a new load balancer 2-3 minutes). Commit <code>urls.env</code> if you want the pipeline to keep it.</p>
+<div class="callout"><b>Known limit of this approach.</b> The page and the two APIs have three different hostnames, so the browser treats the auth service as another site and does not send the refresh cookie back: signing in works, but the session ends when the 15-minute access token expires. One address (approach 2) fixes it. The executor's load balancer exists because each service got one; nothing calls it.</div>
+
+<h2 id="9-kubernetes-approach-2-one-alb-and-an-ingress">9. Kubernetes, approach 2: one ALB and an Ingress</h2>
+<pre><code class="language-bash">deploy/install-lb-controller.sh capstone $REGION     # once per cluster
+kubectl apply -k k8s/overlays/2-ingress
+deploy/set-urls.sh ingress
+kubectl -n trading get ingress,svc
+</code></pre>
+<p>The Services go back to <code>ClusterIP</code> (AWS deletes the four ELBs), and the controller builds one ALB from <code>base/ingress.yaml</code>: <code>/auth</code> → auth-service, <code>/api</code> → order-service, everything else → frontend. The browser addresses are empty, so the page calls its own address. Test: open <code>http://&lt;ALB address&gt;</code>, sign in, then</p>
+<pre><code class="language-bash">ALB=$(kubectl -n trading get ingress app -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+curl -s http://$ALB/app-config.js; curl -s -o /dev/null -w '%{http_code}\n' http://$ALB/api/v1/accounts/1   # 401 without a token
+</code></pre>
+<p>If the address stays empty: <code>kubectl -n trading describe ingress app</code> and <code>kubectl -n kube-system logs deploy/aws-load-balancer-controller</code>.</p>
+<h2 id="10-approach-3-frontend-on-s3-cloudfront-in-front">10. Approach 3: frontend on S3, CloudFront in front</h2>
+<p>Serving static files from S3 through CloudFront is better than an nginx pod: no pod to run, files cached at the edge near the user, and https for free. The ALB keeps serving the APIs; CloudFront sends <code>/auth/*</code> and <code>/api/*</code> to it, so page and APIs still share one address.</p>
+<pre><code class="language-bash">BUCKET=trading-frontend-$ACCOUNT                  # bucket names are global
+aws s3 mb s3://$BUCKET --region $REGION           # stays private: Block Public Access is on by default
+
+deploy/publish-frontend.sh $BUCKET                # files from the tested frontend image, app-config.js = same address
+kubectl apply -k k8s/overlays/3-cloudfront        # Ingress keeps /auth and /api only
+kubectl -n trading delete deployment frontend service frontend --ignore-not-found
+deploy/cloudfront.sh $BUCKET                      # prints the distribution id and https://dxxxx.cloudfront.net
+aws cloudfront wait distribution-deployed --id &lt;DIST_ID&gt;
+</code></pre>
+<p>What <code>cloudfront.sh</code> creates: an Origin Access Control (the bucket is read only by CloudFront, signed), a CloudFront Function that answers app routes like <code>/dashboard</code> with <code>index.html</code>, the distribution from <code>deploy/cloudfront-distribution.json</code> (S3 origin cached with <code>CachingOptimized</code>; ALB origin for <code>/api/*</code> and <code>/auth/*</code> over http with no caching and all headers, cookies and query strings forwarded, so <code>Authorization</code> and the refresh cookie reach the services), and the bucket policy.</p>
+<p>Then tell the services the new https address and turn on Secure cookies:</p>
+<pre><code class="language-bash">vi k8s/overlays/3-cloudfront/urls.env     # CORS_ALLOWED_ORIGINS=https://dxxxx.cloudfront.net   FRONTEND_URL=same   COOKIE_SECURE=true
+kubectl apply -k k8s/overlays/3-cloudfront
+</code></pre>
+<p>Open <code>https://dxxxx.cloudfront.net</code> and sign in. After a frontend change: rebuild and push the image, then <code>DIST_ID=&lt;id&gt; deploy/publish-frontend.sh $BUCKET</code> (it uploads and clears <code>index.html</code> and <code>app-config.js</code> from the cache).</p>
+<h2 id="11-your-domain-route-53-and-acm">11. Your domain: Route 53 and ACM</h2>
+<p>Needs a public hosted zone in Route 53 in this account for your domain (Route 53 → Registered domains to buy one, or delegate a subdomain such as <code>team3.example.com</code> from whoever owns <code>example.com</code> by adding the zone's four NS records there).</p>
+<pre><code class="language-bash">deploy/domain.sh &lt;DIST_ID&gt; trade.example.com
+</code></pre>
+<p>It requests an ACM certificate in <strong>us-east-1</strong> (CloudFront only reads certificates there), adds the validation CNAME to your zone and waits until it is issued, adds the name and certificate to the distribution, and creates an alias <code>A</code> record from the name to CloudFront. Then:</p>
+<pre><code class="language-bash">vi k8s/overlays/3-cloudfront/urls.env     # CORS_ALLOWED_ORIGINS=https://trade.example.com,https://dxxxx.cloudfront.net  FRONTEND_URL=https://trade.example.com
+kubectl apply -k k8s/overlays/3-cloudfront
+aws cloudfront wait distribution-deployed --id &lt;DIST_ID&gt;
+curl -sI https://trade.example.com | head -1
+</code></pre>
+<p>Open <code>https://trade.example.com</code>. That is the final address.</p>
+<h2 id="12-check-an-order-end-to-end-in-kafka">12. Check an order end to end in Kafka</h2>
+<pre><code class="language-bash">kubectl -n trading exec -it kafka-0 -- /opt/kafka/bin/kafka-console-consumer.sh \
+  --bootstrap-server kafka:29092 --topic orders --from-beginning --timeout-ms 10000
+kubectl -n trading exec -it kafka-0 -- /opt/kafka/bin/kafka-console-consumer.sh \
+  --bootstrap-server kafka:29092 --topic trade-events --from-beginning --timeout-ms 10000
+kubectl -n trading logs deploy/executor-service | grep -i order | tail
+</code></pre>
+<p>An <code>ORDER_PLACED</code> on <code>orders</code>, then a fill or rejection on <code>trade-events</code>. The <code>TimeoutException</code> at the end only means the console tool reached the end of the topic. In Docker the same with <code>docker compose exec kafka ...</code>.</p>
+<h2 id="13-when-something-fails">13. When something fails</h2>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>What you see</th>
+<th>Cause</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Register/login fails in the browser on EC2, console shows <code>localhost:3000</code></td>
+<td><code>AUTH_SERVICE_URL</code>/<code>ORDER_SERVICE_URL</code> still localhost</td>
+<td>Set them in <code>.env</code> to <code>http://&lt;IP&gt;:port</code>, <code>docker compose up -d</code></td>
+</tr>
+<tr>
+<td><code>blocked by CORS policy</code></td>
+<td>The page's address is not in <code>CORS_ALLOWED_ORIGINS</code></td>
+<td>Add the exact origin (scheme, host, port), apply/restart</td>
+</tr>
+<tr>
+<td>Logged out after 15 minutes</td>
+<td>Refresh cookie dropped: <code>COOKIE_SECURE=true</code> over http, or page and auth on different hosts</td>
+<td><code>COOKIE_SECURE=false</code> for http; use one address (approach 2/3)</td>
+</tr>
+<tr>
+<td><code>compose build requires buildx 0.17.0 or later</code></td>
+<td>buildx missing</td>
+<td>Section 3.2</td>
+</tr>
+<tr>
+<td>Box freezes during build</td>
+<td>Out of memory</td>
+<td><code>COMPOSE_PARALLEL_LIMIT=1 docker compose build</code></td>
+</tr>
+<tr>
+<td>Build: <code>npm ci</code> lock-file error</td>
+<td><code>package-lock.json</code> behind <code>package.json</code></td>
+<td>Nothing: the Dockerfiles fall back to <code>npm install</code></td>
+</tr>
+<tr>
+<td><code>JWT_SECRET must be set to at least 32 bytes</code></td>
+<td>Secret missing/short</td>
+<td><code>openssl rand -base64 48</code> into <code>.env</code> / <code>secrets.env</code></td>
+</tr>
+<tr>
+<td>executor exits: <code>FAUXNANCE_API_KEY</code></td>
+<td>Key missing</td>
+<td>Put the key in <code>.env</code> / <code>secrets.env</code></td>
+</tr>
+<tr>
+<td>Orders stay <code>NEW</code></td>
+<td>Fauxnance unreachable or key wrong</td>
+<td><code>/health</code> shows <code>fauxnance: degraded</code>; check key and <code>FAUXNANCE_BASE_URL</code></td>
+</tr>
+<tr>
+<td>auth: <code>no pg_hba.conf entry ... no encryption</code></td>
+<td>Unencrypted connection to RDS</td>
+<td><code>PGSSLMODE=no-verify</code> (<code>DOCKER_PGSSLMODE</code> in Docker)</td>
+</tr>
+<tr>
+<td>Pods: <code>CreateContainerConfigError</code></td>
+<td><code>secrets.env</code> not created before apply</td>
+<td><code>cp secrets.env.example secrets.env</code>, fill, apply again</td>
+</tr>
+<tr>
+<td><code>kafka-0</code> Pending, PVC Pending</td>
+<td>EBS CSI add-on missing</td>
+<td><code>eksctl create addon --cluster capstone --name aws-ebs-csi-driver</code> and attach <code>AmazonEBSCSIDriverPolicy</code> to the node role</td>
+</tr>
+<tr>
+<td><code>kafka-0</code> CrashLoop writing <code>meta.properties</code></td>
+<td>Disk owned by root</td>
+<td>Already handled (<code>fsGroup: 1000</code>, data in a subfolder)</td>
+</tr>
+<tr>
+<td>order/executor stuck <code>Init:0/1</code></td>
+<td>Kafka not ready or topics job failed</td>
+<td><code>kubectl -n trading logs job/kafka-topics</code>; <code>kubectl delete job kafka-topics</code> and apply again</td>
+</tr>
+<tr>
+<td>Pods cannot reach RDS (<code>Connection timed out</code>)</td>
+<td>Peering routes or SG rule missing</td>
+<td>Section 7.2, re-run <code>pgtest</code></td>
+</tr>
+<tr>
+<td><code>ImagePullBackOff</code></td>
+<td>Wrong registry/tag in <code>kustomization.yaml</code></td>
+<td><code>aws ecr list-images --repository-name trading-frontend</code></td>
+</tr>
+<tr>
+<td>Ingress has no address</td>
+<td>LB controller missing or no IAM</td>
+<td>Section 9, controller logs</td>
+</tr>
+<tr>
+<td>CloudFront 403 on the page</td>
+<td>Bucket policy or OAC missing, or files not uploaded</td>
+<td>Re-run <code>cloudfront.sh</code> step 4; <code>aws s3 ls s3://$BUCKET</code></td>
+</tr>
+<tr>
+<td>CloudFront 502 on <code>/api</code></td>
+<td>ALB not answering or wrong origin</td>
+<td><code>curl http://&lt;ALB&gt;/api/v1/accounts/1</code> should give 401</td>
+</tr>
+<tr>
+<td>ACM stuck <code>PENDING_VALIDATION</code></td>
+<td>Validation record in the wrong zone, or domain's NS not pointing at the zone</td>
+<td><code>dig NS example.com</code> must list the zone's name servers</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="14-cleaning-up-the-bill">14. Cleaning up (the bill)</h2>
+<p>The cluster (about $73/month for the control plane), load balancers (about $18/month each), NAT gateway and RDS cost money while they exist.</p>
+<pre><code class="language-bash">kubectl delete -k k8s/overlays/3-cloudfront          # removes the ALB first
+eksctl delete cluster -f k8s/cluster.yaml
+aws rds delete-db-instance --db-instance-identifier trading-db --skip-final-snapshot
+aws cloudfront get-distribution-config --id &lt;DIST_ID&gt;  # disable it in the console, then delete
+aws s3 rb s3://$BUCKET --force
+aws ec2 delete-vpc-peering-connection --vpc-peering-connection-id $PCX
+# ECR repositories, the Route 53 record and the EC2 box last
+</code></pre>
+<p>Check EC2 → Volumes for leftover <code>kafka</code> EBS volumes and EC2 → Load Balancers for leftovers.</p>
+</main>
+</body>
+</html>

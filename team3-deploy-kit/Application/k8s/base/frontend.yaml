@@ -1,0 +1,53 @@
+# Frontend: the Angular build served by nginx on port 80 (Frontend/Dockerfile).
+# Generic: works for any single-page app built with that Dockerfile.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: frontend}
+  template:
+    metadata:
+      labels: {app: frontend}
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: frontend
+          image: frontend                 # real address set by `images:` in kustomization.yaml
+          ports:
+            - name: http
+              containerPort: 80
+          env:
+            # Which app-config.js key comes from which setting in config.env.
+            # The browser calls these addresses; "" = the page's own address.
+            - name: RUNTIME_CONFIG
+              value: authApiUrl:BROWSER_AUTH_URL,tradeApiUrl:BROWSER_ORDER_URL   # <-- PROJECT: key names your app reads
+            - name: BROWSER_AUTH_URL
+              valueFrom: {configMapKeyRef: {name: app-config, key: BROWSER_AUTH_URL}}
+            - name: BROWSER_ORDER_URL
+              valueFrom: {configMapKeyRef: {name: app-config, key: BROWSER_ORDER_URL}}
+          readinessProbe:
+            httpGet: {path: /, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /, port: http}
+            periodSeconds: 20
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {cpu: 200m, memory: 128Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  annotations:
+    alb.ingress.kubernetes.io/healthcheck-path: /
+spec:
+  type: ClusterIP                     # the 1-four-elb overlay turns this into a LoadBalancer
+  selector: {app: frontend}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

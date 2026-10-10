@@ -1,0 +1,36 @@
+# ==============================================================================
+# Approach 3: the frontend's files on S3 behind CloudFront (https, your
+# domain via Route 53 + ACM). The cluster serves only the APIs, through the
+# same ALB Ingress, which CloudFront uses as a second origin for /auth/* and
+# /api/*. The frontend Deployment and Service are removed from the cluster.
+#
+#   kubectl apply -k k8s/overlays/3-cloudfront
+#   kubectl -n <namespace> delete deployment frontend service frontend   (if 2-ingress ran before)
+# ==============================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base        # includes base/ingress.yaml
+
+configMapGenerator:
+  - name: app-config
+    behavior: merge
+    envs: [urls.env]
+
+patches:
+  # The Ingress keeps /auth and /api only: its last rule (/ -> frontend) is removed.
+  - target: {kind: Ingress, name: app}
+    patch: |-
+      - {op: remove, path: /spec/rules/0/http/paths/2}
+  - patch: |-
+      $patch: delete
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: frontend
+  - patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: frontend
