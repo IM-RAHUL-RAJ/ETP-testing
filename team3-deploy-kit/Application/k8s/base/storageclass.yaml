@@ -1,0 +1,13 @@
+# The disk type Kafka's volume is created with: an encrypted gp3 EBS volume.
+# Needs the aws-ebs-csi-driver add-on (cluster.yaml installs it).
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: gp3
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3
+  encrypted: "true"
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+reclaimPolicy: Delete

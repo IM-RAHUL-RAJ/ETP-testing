@@ -1,0 +1,33 @@
+# ==============================================================================
+# The EKS cluster, created once per AWS account with eksctl (not by kubectl):
+#
+#   eksctl create cluster -f k8s/cluster.yaml          (about 15-20 minutes)
+#   eksctl delete cluster -f k8s/cluster.yaml          (when finished: stops the bill)
+#
+# Two t3.medium workers fit this stack (3 Java/Node services, nginx, Kafka)
+# with room for the system pods. Change region/name per person.
+# ==============================================================================
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+metadata:
+  name: capstone                      # <-- PROJECT/PERSON
+  region: ap-south-1                  # <-- your region
+  version: "1.34"
+iam:
+  withOIDC: true                      # needed by the EBS CSI driver and the LB controller
+managedNodeGroups:
+  - name: workers
+    instanceType: t3.medium
+    desiredCapacity: 2
+    minSize: 1
+    maxSize: 3
+    volumeSize: 30
+    privateNetworking: true           # nodes in private subnets, out through a NAT gateway
+addons:
+  - name: vpc-cni
+  - name: kube-proxy
+  - name: coredns
+  # Makes EBS volumes for PersistentVolumeClaims (Kafka's disk).
+  - name: aws-ebs-csi-driver
+    wellKnownPolicies:
+      ebsCSIController: true

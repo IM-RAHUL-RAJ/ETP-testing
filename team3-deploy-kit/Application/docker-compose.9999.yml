@@ -1,0 +1,163 @@
+# ==============================================================================
+# The whole ETP trading platform on Docker.
+#
+#   cp .env.example .env        # then put your keys and passwords in .env
+#   docker compose up --build
+#
+# UI http://localhost:4200 · Auth :3000 · Order service :8081 · Executor :8082
+# Postgres :5432 inside the network (published on POSTGRES_HOST_PORT) · Kafka kafka:29092
+#
+# Every container reads Application/.env (env_file) and the shared
+# Application/Config/application.yml (mounted read-only, SHARED_CONFIG). Ports and
+# URLs come from those two files; nothing environment-specific is written here.
+# ==============================================================================
+
+x-shared-config: &shared-config
+  SHARED_CONFIG: /config/application.yml
+
+x-config-volume: &config-volume ./Config/application.yml:/config/application.yml:ro
+
+x-database: &database
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_NAME: ${DB_NAME:?set DB_NAME in .env}
+  DB_USER: ${DB_USER:?set DB_USER in .env}
+  DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+
+x-kafka: &kafka-address
+  # Containers reach the bundled broker by its compose name (Config: kafka:29092).
+  KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${DB_NAME:?set DB_NAME in .env}
+      POSTGRES_USER: ${DB_USER:?set DB_USER in .env}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+    ports:
+      - "${POSTGRES_HOST_PORT:?set POSTGRES_HOST_PORT in .env}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Runs once, on an empty data volume. `docker compose down -v` starts over.
+      - ./Databases/PostgreSQL/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./Databases/PostgreSQL/seed_data.sql:/docker-entrypoint-initdb.d/02-seed_data.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Single-node broker (KRaft). Containers use kafka:29092; tools on the host machine
+  # use KAFKA_ADVERTISED_HOST:9092.
+  kafka:
+    image: apache/kafka:3.8.0
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_LISTENERS: INTERNAL://:29092,CONTROLLER://:29093,EXTERNAL://:9092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://${KAFKA_ADVERTISED_HOST:?set KAFKA_ADVERTISED_HOST in .env}:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      # Topics are created explicitly with their contracted shape, never on first use.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    ports:
+      - "9092:9092"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server kafka:29092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+
+  # Creates the contracted topics, then exits. Safe to run every time: existing topics
+  # are left alone.
+  kafka-init:
+    image: apache/kafka:3.8.0
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      <<: *kafka-address
+      PATH: /opt/kafka/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    volumes:
+      - ./Infrastructure/Kafka/scripts/create-topics.sh:/scripts/create-topics.sh:ro
+    entrypoint: ["bash", "/scripts/create-topics.sh"]
+    restart: "no"
+
+  auth-service:
+    build: ./Services/auth-service
+    env_file: .env
+    environment:
+      <<: [*database, *shared-config]
+    volumes:
+      - *config-volume
+    ports:
+      - "${AUTH_SERVICE_PORT:?set AUTH_SERVICE_PORT in .env}:${AUTH_SERVICE_PORT}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  order-service:
+    build: ./Services/order-service
+    env_file: .env
+    environment:
+      <<: [*database, *kafka-address, *shared-config]
+    volumes:
+      - *config-volume
+    ports:
+      - "${ORDER_SERVICE_PORT:?set ORDER_SERVICE_PORT in .env}:${ORDER_SERVICE_PORT}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+
+  executor-service:
+    build: ./Services/executor-service
+    env_file: .env
+    environment:
+      <<: [*database, *kafka-address, *shared-config]
+    volumes:
+      - *config-volume
+    ports:
+      - "${EXECUTOR_SERVICE_PORT:?set EXECUTOR_SERVICE_PORT in .env}:${EXECUTOR_SERVICE_PORT}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+
+  etl:
+    build: ./ETL Layer
+    env_file: .env
+    environment:
+      <<: [*database, *shared-config]
+      DUCKDB_PATH: /data/analytics.duckdb
+    volumes:
+      - *config-volume
+      - duckdb:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./Frontend
+      # The browser's API addresses, baked into the bundle (see Frontend/scripts/sync-config.mjs).
+      args:
+        AUTH_SERVICE_URL: ${AUTH_SERVICE_URL:?set AUTH_SERVICE_URL in .env}
+        ORDER_SERVICE_URL: ${ORDER_SERVICE_URL:?set ORDER_SERVICE_URL in .env}
+    ports:
+      - "${FRONTEND_PORT:?set FRONTEND_PORT in .env}:80"
+    depends_on:
+      - auth-service
+      - order-service
+
+volumes:
+  pgdata:
+  duckdb:
