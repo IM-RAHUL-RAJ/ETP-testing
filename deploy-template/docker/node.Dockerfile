@@ -7,11 +7,16 @@
 FROM node:22-alpine AS build
 ARG APP_DIR=Services/auth-service
 WORKDIR /app
+# Native modules (argon2, bcrypt) fall back to compiling when their pre-built
+# binary cannot be downloaded; that needs python3, make and g++.
+RUN apk add --no-cache python3 make g++ >/dev/null
 COPY ${APP_DIR}/package*.json ./
 # npm ci needs package-lock.json in step with package.json; fall back to npm install.
 RUN npm ci --no-audit --no-fund || npm install --no-audit --no-fund
 COPY ${APP_DIR}/ ./
 RUN npm run build
+# Keep only production dependencies; the runtime copies them instead of installing again.
+RUN npm prune --omit=dev --no-fund --no-audit
 
 FROM node:22-alpine
 ARG APP_DIR=Services/auth-service
@@ -20,7 +25,7 @@ ARG PORT=3000
 WORKDIR /app
 ENV NODE_ENV=production PORT=${PORT} ENTRY=${ENTRY}
 COPY ${APP_DIR}/package*.json ./
-RUN (npm ci --omit=dev --no-audit --no-fund || npm install --omit=dev --no-audit --no-fund) && npm cache clean --force
+COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 USER node
 EXPOSE ${PORT}
