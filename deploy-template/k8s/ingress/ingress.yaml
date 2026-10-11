@@ -1,0 +1,33 @@
+# Phase 2: ONE public load balancer (an AWS ALB, built by the AWS Load Balancer Controller)
+# in front of everything, routing by path. README step 10 installs the controller first.
+#   /auth -> auth-service, /api -> order-service, everything else -> frontend.
+# executor-service has no public route: the browser never calls it.
+#
+# CHANGE ME if your API paths differ (keep them the same as in docker/frontend-nginx.conf).
+#   envsubst '$PROJECT $ECR_REGISTRY $IMAGE_TAG' < deploy/k8s/ingress/ingress.yaml | kubectl apply -f -
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app
+  namespace: ${PROJECT}
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+spec:
+  ingressClassName: alb
+  rules:
+    - http:
+        paths:
+          - path: /auth
+            pathType: Prefix
+            backend:
+              service: { name: auth-service, port: { number: 3000 } }
+          - path: /api
+            pathType: Prefix
+            backend:
+              service: { name: order-service, port: { number: 8081 } }
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: frontend, port: { number: 80 } }

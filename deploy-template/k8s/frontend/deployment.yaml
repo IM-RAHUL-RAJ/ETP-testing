@@ -1,0 +1,39 @@
+# frontend: one copy of the container, with its settings and secrets.
+# Applied with the image address filled in (README step 9):
+#   envsubst '$PROJECT $ECR_REGISTRY $IMAGE_TAG' < deploy/k8s/frontend/deployment.yaml | kubectl apply -f -
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: ${PROJECT}
+  labels: { app: frontend }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: frontend }
+  template:
+    metadata:
+      labels: { app: frontend }
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: frontend
+          image: ${ECR_REGISTRY}/${PROJECT}/frontend:${IMAGE_TAG}
+          imagePullPolicy: Always
+          ports:
+            - { name: http, containerPort: 80 }
+          # The page itself (nginx).
+          startupProbe:
+            httpGet: { path: "/", port: 80 }
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: { path: "/", port: 80 }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: "/", port: 80 }
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { memory: 384Mi }

@@ -1,0 +1,10 @@
+# The address the services use: kafka:9092 (inside the namespace).
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: ${PROJECT}
+spec:
+  selector: { app: kafka }
+  ports:
+    - { name: kafka, port: 9092, targetPort: 9092 }

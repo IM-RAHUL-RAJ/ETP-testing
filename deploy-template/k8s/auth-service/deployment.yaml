@@ -1,0 +1,46 @@
+# auth-service: one copy of the container, with its settings and secrets.
+# Applied with the image address filled in (README step 9):
+#   envsubst '$PROJECT $ECR_REGISTRY $IMAGE_TAG' < deploy/k8s/auth-service/deployment.yaml | kubectl apply -f -
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-service
+  namespace: ${PROJECT}
+  labels: { app: auth-service }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: auth-service }
+  template:
+    metadata:
+      labels: { app: auth-service }
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: auth-service
+          image: ${ECR_REGISTRY}/${PROJECT}/auth-service:${IMAGE_TAG}
+          imagePullPolicy: Always
+          ports:
+            - { name: http, containerPort: 3000 }
+          # Settings from deploy/env/*.env and the secrets from deploy/env/secrets.env.
+          envFrom:
+            - configMapRef: { name: common-config }
+            - configMapRef: { name: auth-service-config }
+            - secretRef: { name: app-secrets }
+          # Checks that the port answers. If your auth-service has a health route (/health,
+          # /auth/health), use httpGet: { path: "/health", port: 3000 } instead; a route that
+          # returns 404 or 401 counts as a failure.
+          startupProbe:
+            tcpSocket: { port: 3000 }
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            tcpSocket: { port: 3000 }
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: 3000 }
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { memory: 384Mi }

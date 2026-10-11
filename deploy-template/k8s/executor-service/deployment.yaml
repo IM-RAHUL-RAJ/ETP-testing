@@ -1,0 +1,45 @@
+# executor-service: one copy of the container, with its settings and secrets.
+# Applied with the image address filled in (README step 9):
+#   envsubst '$PROJECT $ECR_REGISTRY $IMAGE_TAG' < deploy/k8s/executor-service/deployment.yaml | kubectl apply -f -
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: executor-service
+  namespace: ${PROJECT}
+  labels: { app: executor-service }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: executor-service }
+  template:
+    metadata:
+      labels: { app: executor-service }
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: executor-service
+          image: ${ECR_REGISTRY}/${PROJECT}/executor-service:${IMAGE_TAG}
+          imagePullPolicy: Always
+          ports:
+            - { name: http, containerPort: 8082 }
+          # Settings from deploy/env/*.env and the secrets from deploy/env/secrets.env.
+          envFrom:
+            - configMapRef: { name: common-config }
+            - configMapRef: { name: executor-service-config }
+            - secretRef: { name: app-secrets }
+          # CHANGE ME if your service has no /actuator/health (startupProbe waits up to 5 minutes).
+          # No web server at all (a background worker)? Delete the three probes.
+          startupProbe:
+            httpGet: { path: "/actuator/health", port: 8082 }
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: { path: "/actuator/health", port: 8082 }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: "/actuator/health", port: 8082 }
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 100m, memory: 384Mi }
+            limits: { memory: 768Mi }
