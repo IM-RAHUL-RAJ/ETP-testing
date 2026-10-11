@@ -28,6 +28,7 @@ spec:
             - configMapRef: { name: executor-service-config }
             - secretRef: { name: app-secrets }
           # CHANGE ME if your service has no /actuator/health (startupProbe waits up to 5 minutes).
+          # No web server at all (a background worker)? Delete the three probes.
           startupProbe:
             httpGet: { path: "/actuator/health", port: 8082 }
             periodSeconds: 5

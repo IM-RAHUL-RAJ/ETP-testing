@@ -376,6 +376,8 @@ not broken code.
 | Frontend build stops in `check-bundle-secrets`, or never ends | The image build has no secrets (`ALLOW_MISSING_SECRET_VALUES=1` is set for you); a build that never ends after "Output location" has a process left running: build locally and check. |
 | Page loads but every API call fails | The page calls `http://localhost:...`. Make the base URLs empty or relative in `environment.prod.ts`. |
 | `/actuator/health` 401 or 503; pod never Ready | Spring Security must permit `/actuator/health`; mail health is already off in `java.Dockerfile`. |
+| executor pod restarted every few minutes by its startup probe; its log never shows `Tomcat started` | Your executor is a background worker with no web server (no `spring-boot-starter-web`), so nothing answers the probe. Delete the three probes from `k8s/executor-service/deployment.yaml`; Kubernetes then restarts it only if the process exits. |
+| `docker compose ps` says running, but a feature does not work | A service in a restart loop looks running between restarts. Check `RESTARTS` in `kubectl get pods` (or `docker compose ps` uptime) and read the first `Caused by` in its log. The page and API can answer while the executor is down. |
 | `The server does not support SSL connections` | The service requires SSL; the local Postgres has it on. On RDS keep SSL; make it a setting rather than tied to `NODE_ENV`. |
 | `secret must be at least 32 bytes` | Use `openssl rand -hex 32`. |
 | SQL fails at `<<<<<<<` | A merge or stash conflict left in a `.sql` file: resolve it. |
