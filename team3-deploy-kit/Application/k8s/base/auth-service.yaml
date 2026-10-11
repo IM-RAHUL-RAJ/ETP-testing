@@ -1,0 +1,61 @@
+# Auth service (the BFF). Generic Node service: change only the lines marked  # <-- PROJECT
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: auth-service}
+  template:
+    metadata:
+      labels: {app: auth-service}
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: auth-service
+          image: auth-service            # real address set by `images:` in kustomization.yaml
+          ports:
+            - name: http
+              containerPort: 3000         # <-- PROJECT: the port the code listens on
+          # Every setting and secret, under the names the code reads.
+          envFrom:
+            - configMapRef: {name: app-config}
+            - secretRef: {name: app-secrets}
+          env:
+            # The listening port, set per pod (config.env is shared by every pod).
+            - {name: PORT, value: "3000"}   # <-- PROJECT
+          volumeMounts:
+            - {name: shared-config, mountPath: /config, readOnly: true}
+          startupProbe:
+            httpGet: {path: /docs/json, port: http}   # <-- PROJECT: a path that answers 200 without login
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /docs/json, port: http}   # <-- PROJECT
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /docs/json, port: http}   # <-- PROJECT
+            periodSeconds: 20
+          resources:
+            requests: {cpu: 50m, memory: 160Mi}
+            limits: {cpu: 500m, memory: 384Mi}
+      volumes:
+        # The project's Config/application.yml, if it has one (see GUIDE.html).
+        - name: shared-config
+          configMap: {name: shared-config, optional: true}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-service
+  annotations:
+    # Used only behind the Ingress (ALB health check).
+    alb.ingress.kubernetes.io/healthcheck-path: /docs/json   # <-- PROJECT
+spec:
+  type: ClusterIP                     # the 1-four-elb overlay turns this into a LoadBalancer
+  selector: {app: auth-service}
+  ports:
+    - name: http
+      port: 3000                      # <-- PROJECT: same as containerPort
+      targetPort: http

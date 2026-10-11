@@ -1,0 +1,48 @@
+# ==============================================================================
+# The application on Kubernetes, without any way in from outside yet.
+# Do not apply this folder on its own: apply one of the overlays, which add
+# the way in (four load balancers, one Ingress, or CloudFront + Ingress).
+#
+#   kubectl apply -k k8s/overlays/1-four-elb
+#
+# Per project, edit only:  namespace, images (registry + tag), config.env,
+# secrets.env, and the  # <-- PROJECT  lines in the four application files.
+# ==============================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: trading                                    # <-- PROJECT: one namespace per project
+
+resources:
+  - namespace.yaml
+  - storageclass.yaml
+  - kafka.yaml
+  - auth-service.yaml
+  - order-service.yaml
+  - executor-service.yaml
+  - frontend.yaml
+  - ingress.yaml        # used by overlays 2 and 3; removed by 1-four-elb
+
+# Settings and secrets as environment variables. A changed value gives the
+# ConfigMap/Secret a new name, so `kubectl apply -k` restarts the pods that use it.
+configMapGenerator:
+  - name: app-config
+    envs: [config.env]
+secretGenerator:
+  - name: app-secrets
+    envs: [secrets.env]
+
+# Where the images are: your ECR registry and the tag you pushed.   # <-- PROJECT
+images:
+  - name: frontend
+    newName: ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/trading-frontend
+    newTag: "1.0"
+  - name: auth-service
+    newName: ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/trading-auth-service
+    newTag: "1.0"
+  - name: order-service
+    newName: ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/trading-order-service
+    newTag: "1.0"
+  - name: executor-service
+    newName: ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/trading-executor-service
+    newTag: "1.0"

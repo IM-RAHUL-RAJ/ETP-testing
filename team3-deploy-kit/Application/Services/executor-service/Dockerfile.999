@@ -1,0 +1,27 @@
+# ---- Stage 1: Build ----
+FROM maven:3.9.6-eclipse-temurin-21 AS builder
+
+WORKDIR /app
+
+# Copy pom first for layer caching
+COPY pom.xml .
+RUN mvn dependency:go-offline -q
+
+# Copy source and build (skip tests — tests run in CI, not image build)
+COPY src ./src
+RUN mvn package -DskipTests -q
+
+# ---- Stage 2: Runtime ----
+FROM eclipse-temurin:21-jre-alpine
+
+WORKDIR /app
+
+# Non-root user for security
+RUN addgroup -S executor && adduser -S executor -G executor
+USER executor
+
+COPY --from=builder /app/target/*.jar app.jar
+
+# The listening port comes from Application/.env or Config/application.yml; compose publishes it.
+
+ENTRYPOINT ["java", "-jar", "app.jar"]

@@ -1,0 +1,65 @@
+{
+  "CallerReference": "@CALLER@",
+  "Comment": "frontend on S3 + APIs on the EKS ALB",
+  "Enabled": true,
+  "HttpVersion": "http2and3",
+  "PriceClass": "PriceClass_All",
+  "DefaultRootObject": "index.html",
+  "Aliases": {"Quantity": 0},
+  "ViewerCertificate": {"CloudFrontDefaultCertificate": true},
+  "Origins": {
+    "Quantity": 2,
+    "Items": [
+      {
+        "Id": "s3-site",
+        "DomainName": "@BUCKET_DOMAIN@",
+        "OriginAccessControlId": "@OAC_ID@",
+        "S3OriginConfig": {"OriginAccessIdentity": ""}
+      },
+      {
+        "Id": "alb-api",
+        "DomainName": "@ALB@",
+        "CustomOriginConfig": {
+          "HTTPPort": 80,
+          "HTTPSPort": 443,
+          "OriginProtocolPolicy": "http-only",
+          "OriginReadTimeout": 60,
+          "OriginKeepaliveTimeout": 5
+        }
+      }
+    ]
+  },
+  "DefaultCacheBehavior": {
+    "TargetOriginId": "s3-site",
+    "ViewerProtocolPolicy": "redirect-to-https",
+    "Compress": true,
+    "CachePolicyId": "658327ea-f89d-4fab-a63d-7e88639e58f6",
+    "AllowedMethods": {"Quantity": 2, "Items": ["GET", "HEAD"], "CachedMethods": {"Quantity": 2, "Items": ["GET", "HEAD"]}},
+    "FunctionAssociations": {"Quantity": 1, "Items": [{"EventType": "viewer-request", "FunctionARN": "@FUNCTION_ARN@"}]}
+  },
+  "CacheBehaviors": {
+    "Quantity": 2,
+    "Items": [
+      {
+        "PathPattern": "/api/*",
+        "TargetOriginId": "alb-api",
+        "ViewerProtocolPolicy": "https-only",
+        "Compress": true,
+        "AllowedMethods": {"Quantity": 7, "Items": ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"],
+                           "CachedMethods": {"Quantity": 2, "Items": ["GET", "HEAD"]}},
+        "ForwardedValues": {"QueryString": true, "Cookies": {"Forward": "all"}, "Headers": {"Quantity": 1, "Items": ["*"]}},
+        "MinTTL": 0, "DefaultTTL": 0, "MaxTTL": 0
+      },
+      {
+        "PathPattern": "/auth/*",
+        "TargetOriginId": "alb-api",
+        "ViewerProtocolPolicy": "https-only",
+        "Compress": true,
+        "AllowedMethods": {"Quantity": 7, "Items": ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"],
+                           "CachedMethods": {"Quantity": 2, "Items": ["GET", "HEAD"]}},
+        "ForwardedValues": {"QueryString": true, "Cookies": {"Forward": "all"}, "Headers": {"Quantity": 1, "Items": ["*"]}},
+        "MinTTL": 0, "DefaultTTL": 0, "MaxTTL": 0
+      }
+    ]
+  }
+}

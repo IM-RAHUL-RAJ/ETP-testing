@@ -1,0 +1,129 @@
+# Kafka: one broker (KRaft, no ZooKeeper) with its own 2 GiB EBS disk, so
+# messages survive a pod restart, plus a Job that creates the topics.
+# Generic: the topic list comes from KAFKA_TOPICS in config.env.
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+spec:
+  # Headless: gives the pod the stable name kafka-0.kafka the controller needs.
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app: kafka
+  ports:
+    - name: kafka
+      port: 29092
+      targetPort: kafka
+    - name: controller
+      port: 9093
+      targetPort: controller
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+spec:
+  serviceName: kafka
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+    spec:
+      # Without this Kubernetes injects KAFKA_PORT=tcp://..., which the image reads as a setting.
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      # Kafka runs as uid 1000; a fresh EBS disk belongs to root.
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: kafka
+          image: apache/kafka:3.8.0
+          ports:
+            - name: kafka
+              containerPort: 29092
+            - name: controller
+              containerPort: 9093
+          env:
+            - {name: KAFKA_NODE_ID, value: "1"}
+            - {name: KAFKA_PROCESS_ROLES, value: "broker,controller"}
+            - {name: KAFKA_LISTENERS, value: "INTERNAL://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093"}
+            - {name: KAFKA_ADVERTISED_LISTENERS, value: "INTERNAL://kafka:29092"}
+            - {name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP, value: "CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT"}
+            - {name: KAFKA_CONTROLLER_QUORUM_VOTERS, value: "1@kafka-0.kafka:9093"}
+            - {name: KAFKA_CONTROLLER_LISTENER_NAMES, value: CONTROLLER}
+            - {name: KAFKA_INTER_BROKER_LISTENER_NAME, value: INTERNAL}
+            - {name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR, value: "1"}
+            - {name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR, value: "1"}
+            - {name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR, value: "1"}
+            - {name: KAFKA_AUTO_CREATE_TOPICS_ENABLE, value: "false"}
+            # A sub-folder: a new ext4 disk has lost+found at its root, which Kafka rejects.
+            - {name: KAFKA_LOG_DIRS, value: /var/lib/kafka/data/kraft}
+            - {name: KAFKA_HEAP_OPTS, value: "-Xms256m -Xmx256m"}
+          # Port checks: a kafka-topics.sh probe takes longer than a probe timeout.
+          startupProbe:
+            tcpSocket: {port: kafka}
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            tcpSocket: {port: kafka}
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: {port: kafka}
+            periodSeconds: 20
+          resources:
+            requests: {cpu: 100m, memory: 384Mi}
+            limits: {cpu: 500m, memory: 640Mi}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/kafka/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: gp3
+        resources:
+          requests:
+            storage: 2Gi
+---
+# Creates every topic in KAFKA_TOPICS ("name:partitions:retention-ms ...").
+# Safe to re-run: kubectl delete job kafka-topics && kubectl apply -k ...
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-topics
+spec:
+  backoffLimit: 20
+  template:
+    metadata:
+      labels:
+        app: kafka-topics
+    spec:
+      enableServiceLinks: false
+      restartPolicy: OnFailure
+      containers:
+        - name: create-topics
+          image: apache/kafka:3.8.0
+          envFrom:
+            - configMapRef:
+                name: app-config
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              BS=kafka:29092
+              until /opt/kafka/bin/kafka-topics.sh --bootstrap-server $BS --list >/dev/null 2>&1; do
+                echo "waiting for Kafka"; sleep 5
+              done
+              for t in $KAFKA_TOPICS; do
+                name=${t%%:*}; rest=${t#*:}; parts=${rest%%:*}; keep=${rest#*:}
+                /opt/kafka/bin/kafka-topics.sh --bootstrap-server $BS --create --if-not-exists \
+                  --topic "$name" --partitions "$parts" --replication-factor 1 --config retention.ms="$keep"
+              done
+              /opt/kafka/bin/kafka-topics.sh --bootstrap-server $BS --list

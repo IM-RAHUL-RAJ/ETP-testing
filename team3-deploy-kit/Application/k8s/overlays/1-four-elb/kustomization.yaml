@@ -1,0 +1,33 @@
+# ==============================================================================
+# Approach 1: one AWS load balancer per application (four in all).
+#
+#   kubectl apply -k k8s/overlays/1-four-elb
+#   deploy/set-urls.sh          once the load balancers have addresses
+#
+# Each Service of type LoadBalancer makes AWS create a Classic Load Balancer
+# with its own public hostname. The browser calls auth and order directly,
+# so their addresses go into urls.env (written by set-urls.sh) and the
+# frontend hands them to the browser. The executor gets one because it was
+# asked for; the browser never calls it.
+# ==============================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+
+configMapGenerator:
+  - name: app-config
+    behavior: merge
+    envs: [urls.env]
+
+patches:
+  # No Ingress in this approach.
+  - patch: |-
+      $patch: delete
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata:
+        name: app
+  - target: {kind: Service, name: "frontend|auth-service|order-service|executor-service"}
+    patch: |-
+      - {op: replace, path: /spec/type, value: LoadBalancer}

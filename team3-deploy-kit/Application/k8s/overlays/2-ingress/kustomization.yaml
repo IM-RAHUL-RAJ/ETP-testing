@@ -1,0 +1,19 @@
+# ==============================================================================
+# Approach 2: one load balancer (an ALB) and an Ingress in front of everything.
+#
+#   kubectl apply -k k8s/overlays/2-ingress
+#   deploy/set-urls.sh ingress  once the ALB has an address
+#
+# All Services stay internal (ClusterIP). The page and the APIs share one
+# address, so the browser addresses are empty ("same address as the page")
+# and nothing has to be filled in for the app to work.
+# ==============================================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base        # includes base/ingress.yaml
+
+configMapGenerator:
+  - name: app-config
+    behavior: merge
+    envs: [urls.env]

@@ -1,0 +1,6 @@
+# Everything of this project lives in one namespace. The name is set in
+# kustomization.yaml (namespace:), which renames this object too.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: app
