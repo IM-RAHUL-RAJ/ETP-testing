@@ -1,0 +1,26 @@
+frontend:
+  url: http://localhost
+  port: 4200
+
+services:
+  auth:
+    url: http://localhost
+    port: 3000
+
+  order:
+    url: http://localhost
+    port: 8081
+
+  executor:
+    url: http://localhost
+    port: 8082
+
+database:
+  host: localhost
+  port: 5432
+  name: trading_system_db
+  user: postgres
+
+kafka:
+  host: kafka
+  port: 29092

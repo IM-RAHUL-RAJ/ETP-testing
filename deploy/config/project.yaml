@@ -1,0 +1,43 @@
+# What our files need to know about your code. Written once.
+# Explained line by line in GUIDE.html, step 1.
+
+name: trading
+
+folders:
+  frontend:
+    path: frontend
+    type: angular         # java | node | angular | python
+    health: /
+  auth:
+    path: auth-service
+    type: node
+    health: /
+  order:
+    path: order-service
+    type: java
+    health: /actuator/health
+  executor:
+    path: executor-service
+    type: java
+    health: /actuator/health
+
+sql:
+  - db/schema.sql
+  - db/seed-data.sql
+
+mailpit: true
+
+settings:
+  DB_HOST: "{db_host}"
+  DB_PORT: "{db_port}"
+  DB_NAME: "{db_name}"
+  DB_USER: "{db_user}"
+  PGSSLMODE: "{db_sslmode}"
+  KAFKA_BOOTSTRAP_SERVERS: "{kafka}"
+  CORS_ALLOWED_ORIGINS: "{cors_origins}"
+
+secrets:
+  - DB_PASSWORD
+  - JWT_SECRET
+
+database_password: DB_PASSWORD

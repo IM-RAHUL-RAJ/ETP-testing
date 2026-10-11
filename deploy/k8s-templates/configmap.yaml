@@ -1,0 +1,8 @@
+# The `settings` of config/project.yaml. Every application pod receives all of them.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: @@NS@@
+data:
+@@DATA@@
